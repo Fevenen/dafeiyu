@@ -131,6 +131,43 @@ powershell -ExecutionPolicy Bypass -File .\deps\bootstrap.ps1
 
 > 语音和形象也可以用**免费替代**：`edge-tts` + 桌宠自带的 Live2D 模型。
 
+### 启用完整资产（改 conf.yaml）
+
+附件解压后，在 `pet\conf.yaml` 里确认这几项：
+
+**Live2D 形象**
+
+```yaml
+live2d_model_name: 'ds-whale-girl'
+```
+
+**TTS（布洛妮娅音色）**
+
+```yaml
+tts_model: 'sherpa_onnx_tts'
+
+sherpa_onnx_tts:
+  vits_model: 'models/sherpa/bronya/bronya.onnx'
+  vits_lexicon: 'models/sherpa/bronya/lexicon.txt'
+  vits_tokens: 'models/sherpa/bronya/tokens.txt'
+  vits_dict_dir: 'models/sherpa/bronya/dict'
+  tts_rule_fsts: 'models/sherpa/bronya/number.fst,models/sherpa/bronya/phone.fst,models/sherpa/bronya/date.fst'
+```
+
+**ASR（语音识别）**
+
+```yaml
+asr_model: 'sherpa_onnx_asr'
+
+sherpa_onnx_asr:
+  model_type: 'sense_voice'
+  sense_voice: './models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx'
+  tokens: './models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt'
+  num_threads: 4
+```
+
+**改完重启桌宠后端**，她的形象和声音就是作者同款了。
+
 ### 接你自己的本地模型
 
 **模型不用打包，用你自己电脑上已经有的。** 桌宠支持任何 OpenAI 兼容接口。
