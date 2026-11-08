@@ -285,18 +285,22 @@ Copy-Item .\bridge\config.example.json .\bridge\config.json
 
 ### 3. 挂 MCP（桌宠自己用）
 
-在桌宠的 `mcp_servers.json` 里加入：
+**用 `bootstrap.ps1` 的话，这一步已经自动完成了**（它会写入 `mcp_servers.json`）。
+
+手动安装时，在桌宠的 `mcp_servers.json` 里加入：
 
 ```json
 {
   "mcp_servers": {
     "msg-bridge": {
-      "command": "<你的 python>\\python.exe",
+      "command": "<桌宠目录>\\.venv\\Scripts\\python.exe",
       "args": ["<桌宠目录>\\bridge\\server.py"]
     }
   }
 }
 ```
+
+> ⚠️ 这个 python 必须能 `import mcp`（`uv pip install mcp`）。
 
 重启桌宠后端，日志里应出现 `ToolManager initialized with 7 OpenAI tools`。
 

@@ -65,8 +65,8 @@ Push-Location $petDir
 try {
     uv sync
     if ($LASTEXITCODE -ne 0) { Warn "uv sync 失败，可手动执行：cd $petDir; uv sync" } else { Ok "桌宠依赖装好" }
-    uv pip install requests pypinyin rapidfuzz | Out-Null
-    if ($LASTEXITCODE -eq 0) { Ok "bridge 依赖（requests / pypinyin / rapidfuzz）已装" } else { Warn "bridge 依赖失败，可手动：uv pip install requests pypinyin rapidfuzz" }
+    uv pip install requests pypinyin rapidfuzz mcp | Out-Null
+    if ($LASTEXITCODE -eq 0) { Ok "bridge 依赖（requests / pypinyin / rapidfuzz / mcp）已装" } else { Warn "bridge 依赖失败，可手动：uv pip install requests pypinyin rapidfuzz mcp" }
 } finally { Pop-Location }
 
 # ---------- 4. SnowLuma ----------
@@ -143,6 +143,15 @@ foreach ($a in $assets) {
 
 # ---------- 7. 配置 + 工作区 ----------
 Write-Host "`n[7/8] 生成配置和工作区"
+
+# conf.yaml：没有就从模板生成（之后要自己填模型/API key）
+$confPath = Join-Path $petDir "conf.yaml"
+$confTpl = Join-Path $petDir "config_templates\conf.default.yaml"
+if ((-not (Test-Path $confPath)) -and (Test-Path $confTpl)) {
+    Copy-Item $confTpl $confPath
+    Ok "已从模板生成 conf.yaml（记得填模型/API key）"
+}
+
 $cfgPath = Join-Path $bridgeDst "config.json"
 if (-not (Test-Path $cfgPath)) {
     $venvPy = Join-Path $petDir ".venv\Scripts\python.exe"
@@ -164,6 +173,30 @@ if ((Test-Path $agentsSrc) -and (-not (Test-Path $agents))) {
     Copy-Item $agentsSrc $agents
     Ok "工作区人设: $agents"
 }
+
+# 自动把 msg-bridge 加进桌宠的 mcp_servers.json
+$mcpPath = Join-Path $petDir "mcp_servers.json"
+$mcpServers = [ordered]@{}
+if (Test-Path $mcpPath) {
+    try {
+        $old = Get-Content $mcpPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($old.mcp_servers) {
+            foreach ($prop in $old.mcp_servers.PSObject.Properties) {
+                $mcpServers[$prop.Name] = $prop.Value
+            }
+        }
+    } catch {
+        Warn "现有 mcp_servers.json 解析失败，将重建（原文件备份为 .bak）"
+        Copy-Item $mcpPath "$mcpPath.bak" -Force
+    }
+}
+$mcpServers["msg-bridge"] = [ordered]@{
+    command = (Join-Path $petDir ".venv\Scripts\python.exe")
+    args    = @((Join-Path $bridgeDst "server.py"))
+}
+$mcpObj = [ordered]@{ mcp_servers = $mcpServers }
+$mcpObj | ConvertTo-Json -Depth 8 | Set-Content -Path $mcpPath -Encoding UTF8
+Ok "已写入 mcp_servers.json（msg-bridge）"
 
 $launcher = Join-Path $repoDir "启动桌宠客户端.cmd"
 if ((Test-Path $launcher) -and (-not (Test-Path (Join-Path $petDir "启动桌宠客户端.cmd")))) {

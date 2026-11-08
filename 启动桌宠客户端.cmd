@@ -13,15 +13,17 @@ set "SNOWLUMA=%~dp0..\v0\SnowLuma"
 set "PETWS=%~dp0..\pet_workspace"
 set "PY=%~dp0.venv\Scripts\python.exe"
 
-if not exist "%APP%" (
-    echo [ERROR] Desktop client not found: %APP%
-    pause
-    exit /b 1
-)
 if not exist "%PY%" (
     echo [ERROR] venv not found: %PY%
     pause
     exit /b 1
+)
+
+rem Electron client is optional: browser works too
+set "HAS_APP=1"
+if not exist "%APP%" (
+    set "HAS_APP=0"
+    echo [INFO] Electron client not found - will open the web UI in your browser instead.
 )
 
 rem ---- 1. SnowLuma (QQ bridge) ----
@@ -50,7 +52,12 @@ if exist "%PETWS%" (
     echo [WARN] pet_workspace not found, DSH watcher skipped
 )
 
-rem ---- 5. desktop client ----
-powershell -NoProfile -Command "if (-not (Get-Process | Where-Object { $_.ProcessName -match 'open-llm' })) { Start-Process -FilePath '%APP%' -WorkingDirectory '%~dp0pet-web\release\1.2.1\win-unpacked' }"
-echo [OK] Desktop client checked
+rem ---- 5. desktop client (Electron if present, otherwise browser) ----
+if "%HAS_APP%"=="1" (
+    powershell -NoProfile -Command "if (-not (Get-Process | Where-Object { $_.ProcessName -match 'open-llm' })) { Start-Process -FilePath '%APP%' -WorkingDirectory '%~dp0pet-web\release\1.2.1\win-unpacked' }"
+    echo [OK] Desktop client checked
+) else (
+    echo [OK] Opening web UI: http://127.0.0.1:12393
+    start "" "http://127.0.0.1:12393"
+)
 exit /b 0
