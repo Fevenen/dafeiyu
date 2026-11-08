@@ -21,3 +21,6 @@ logs/
 # 运行数据
 bridge/_v0/reminders.json
 __pycache__/
+
+# 发布附件（走 GitHub Release，不进仓库）
+assets/

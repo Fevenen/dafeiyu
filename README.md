@@ -92,7 +92,7 @@
 
 ---
 
-## 依赖（都需要你自己装）
+## 依赖（自动安装）
 
 | 组件 | 作用 | 说明 |
 |---|---|---|
@@ -112,10 +112,24 @@
 powershell -ExecutionPolicy Bypass -File .\deps\bootstrap.ps1
 ```
 
-它会：检查工具 → `git clone` 桌宠 → `uv sync` → 提示下载 SnowLuma → 复制 bridge → 生成 config。
+它会：检查工具 → `git clone` 桌宠 → `uv sync` → 自动下载 SnowLuma → 复制 bridge → **下载模型/音色/Live2D** → 生成 config。
 
-> 语音和形象默认用**免费替代**：`edge-tts` + 桌宠自带的 Live2D 模型。
-> 想用作者同款音色/形象，请自己训练或找作者授权。
+### 完整资产（Release 附件）
+
+作者同款的音色和形象作为 GitHub Release 附件提供，`bootstrap.ps1` 会自动下载：
+
+| 附件 | 大小 | 解压到 |
+|---|---|---|
+| `tts-bronya.zip` | 112 MB | `pet\models\sherpa\bronya\` |
+| `asr-sensevoice.zip` | 153 MB | `pet\models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17\` |
+| `live2d-whale.zip` | 3 MB | `pet\live2d-models\ds-whale-girl\` |
+
+下载失败时，去 [Releases](https://github.com/Fevenen/dafeiyu/releases) 页面手动下载解压到对应目录即可。
+
+> ⚠️ 音色与 Live2D 来自第三方（游戏角色声线 / 同人作品），仅作学习交流，请勿商用。
+> 想公开发布或商用，请自行替换为你有权使用的资产。
+
+> 语音和形象也可以用**免费替代**：`edge-tts` + 桌宠自带的 Live2D 模型。
 
 ### 接你自己的本地模型
 

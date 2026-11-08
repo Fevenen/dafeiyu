@@ -1,8 +1,7 @@
 ﻿#requires -Version 5.1
 <#
   大肥鱼桌宠 · 依赖安装
-  自动：桌宠本体 + Python 依赖 + SnowLuma（官方 Release）+ bridge + 配置 + 工作区
-  不自动：LLM 模型文件（用你自己的本地模型 / 云端 API，见 README「接你自己的本地模型」）
+  自动：桌宠本体 + Python 依赖 + SnowLuma + bridge + 模型/音色/Live2D + 配置
 
   用法：
     powershell -ExecutionPolicy Bypass -File .\deps\bootstrap.ps1
@@ -12,7 +11,8 @@
 param(
     [string]$Root = (Join-Path (Split-Path -Parent $PSScriptRoot) ".."),
     [string]$OlvRepo = "https://github.com/Open-LLM-VTuber/Open-LLM-VTuber.git",
-    [string]$SnowLumaSlug = "SnowLumaDevs/SnowLuma"
+    [string]$SnowLumaSlug = "SnowLumaDevs/SnowLuma",
+    [string]$AssetBase = "https://github.com/Fevenen/dafeiyu/releases/download/v0.1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,7 +33,7 @@ Write-Host "`n=== 大肥鱼桌宠 · 依赖安装 ==="
 Info "安装目录: $Root"
 
 # ---------- 1. 基础工具 ----------
-Write-Host "`n[1/7] 检查基础工具"
+Write-Host "`n[1/8] 检查基础工具"
 $missing = @()
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { $missing += "git" }
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { $missing += "python" }
@@ -48,7 +48,7 @@ if ($missing.Count -gt 0) {
 Ok "git / python / uv 都在"
 
 # ---------- 2. 桌宠本体 ----------
-Write-Host "`n[2/7] Open-LLM-VTuber"
+Write-Host "`n[2/8] Open-LLM-VTuber"
 if (Test-Path (Join-Path $petDir "run_server.py")) {
     Ok "已存在: $petDir"
 } else {
@@ -60,31 +60,31 @@ if (Test-Path (Join-Path $petDir "run_server.py")) {
 }
 
 # ---------- 3. Python 依赖 ----------
-Write-Host "`n[3/7] 安装 Python 依赖（可能几分钟）"
+Write-Host "`n[3/8] 安装 Python 依赖（可能几分钟）"
 Push-Location $petDir
 try {
     uv sync
-    if ($LASTEXITCODE -ne 0) { Warn "uv sync 失败，可手动执行：cd $petDir; uv sync" } else { Ok "依赖装好" }
+    if ($LASTEXITCODE -ne 0) { Warn "uv sync 失败，可手动执行：cd $petDir; uv sync" } else { Ok "桌宠依赖装好" }
     uv pip install requests pypinyin rapidfuzz | Out-Null
-    if ($LASTEXITCODE -eq 0) { Ok "bridge 依赖（requests / pypinyin / rapidfuzz）已装" } else { Warn "bridge 依赖安装失败，可手动：uv pip install requests pypinyin rapidfuzz" }
+    if ($LASTEXITCODE -eq 0) { Ok "bridge 依赖（requests / pypinyin / rapidfuzz）已装" } else { Warn "bridge 依赖失败，可手动：uv pip install requests pypinyin rapidfuzz" }
 } finally { Pop-Location }
 
-# ---------- 4. SnowLuma（官方 Release 自动下载） ----------
-Write-Host "`n[4/7] SnowLuma（QQ 协议端）"
+# ---------- 4. SnowLuma ----------
+Write-Host "`n[4/8] SnowLuma（QQ 协议端）"
 if (Test-Path (Join-Path $snowDir "launcher.bat")) {
     Ok "已存在: $snowDir"
 } else {
     New-Item -ItemType Directory -Force -Path $v0Dir | Out-Null
     $api = "https://api.github.com/repos/$SnowLumaSlug/releases/latest"
     try {
-        Info "查询最新 Release：$api"
+        Info "查询最新 Release"
         $rel = Invoke-RestMethod -Uri $api -Headers @{ "User-Agent" = "bootstrap" } -TimeoutSec 30
         $asset = $rel.assets | Where-Object { $_.name -match '(win|windows)' } | Select-Object -First 1
         if (-not $asset) { $asset = $rel.assets | Select-Object -First 1 }
         if (-not $asset) { throw "Release 里没有可下载的文件" }
         $zip = Join-Path $env:TEMP $asset.name
         Info "下载 $($asset.name)（$([math]::Round($asset.size/1MB)) MB）"
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -TimeoutSec 600
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -TimeoutSec 900
         Expand-Archive -Path $zip -DestinationPath $snowDir -Force
         Remove-Item $zip -Force -ErrorAction SilentlyContinue
         $inner = Get-ChildItem $snowDir -Directory | Where-Object { Test-Path (Join-Path $_.FullName "launcher.bat") } | Select-Object -First 1
@@ -102,7 +102,7 @@ if (Test-Path (Join-Path $snowDir "launcher.bat")) {
 }
 
 # ---------- 5. bridge ----------
-Write-Host "`n[5/7] 复制 bridge 代码"
+Write-Host "`n[5/8] 复制 bridge 代码"
 $bridgeSrc = Join-Path $repoDir "bridge"
 $bridgeDst = Join-Path $petDir "bridge"
 if (Test-Path $bridgeSrc) {
@@ -114,8 +114,35 @@ if (Test-Path $bridgeSrc) {
     Warn "找不到 $bridgeSrc，跳过"
 }
 
-# ---------- 6. 配置 + 工作区 ----------
-Write-Host "`n[6/7] 生成配置和工作区"
+# ---------- 6. 模型 / 音色 / Live2D（Release 附件） ----------
+Write-Host "`n[6/8] 下载模型 / 音色 / Live2D"
+$assets = @(
+    @{ file = "tts-bronya.zip";      dest = (Join-Path $petDir "models\sherpa\bronya");                                  check = "bronya.onnx" },
+    @{ file = "asr-sensevoice.zip";  dest = (Join-Path $petDir "models\sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"); check = "model.int8.onnx" },
+    @{ file = "live2d-whale.zip";    dest = (Join-Path $petDir "live2d-models\ds-whale-girl");                            check = "runtime" }
+)
+foreach ($a in $assets) {
+    if (Test-Path (Join-Path $a.dest $a.check)) {
+        Ok "已存在: $($a.file)"
+        continue
+    }
+    $url = "$AssetBase/$($a.file)"
+    try {
+        Info "下载 $($a.file) …"
+        $zip = Join-Path $env:TEMP $a.file
+        Invoke-WebRequest -Uri $url -OutFile $zip -TimeoutSec 1800
+        New-Item -ItemType Directory -Force -Path $a.dest | Out-Null
+        Expand-Archive -Path $zip -DestinationPath $a.dest -Force
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        Ok "已解压到 $($a.dest)"
+    } catch {
+        Warn "下载失败：$($a.file) —— $($_.Exception.Message)"
+        Info "可从 Release 页面手动下载并解压到：$($a.dest)"
+    }
+}
+
+# ---------- 7. 配置 + 工作区 ----------
+Write-Host "`n[7/8] 生成配置和工作区"
 $cfgPath = Join-Path $bridgeDst "config.json"
 if (-not (Test-Path $cfgPath)) {
     $venvPy = Join-Path $petDir ".venv\Scripts\python.exe"
@@ -144,8 +171,8 @@ if ((Test-Path $launcher) -and (-not (Test-Path (Join-Path $petDir "启动桌宠
     Ok "启动脚本已放到桌宠目录"
 }
 
-# ---------- 7. 收尾 ----------
-Write-Host "`n[7/7] 完成。接下来手工做："
+# ---------- 8. 收尾 ----------
+Write-Host "`n[8/8] 完成。接下来手工做："
 Write-Host "  1) 启动 SnowLuma 并登录 QQ：$snowDir\launcher.bat"
 Write-Host "  2) 配模型（README「接你自己的本地模型」）：编辑 $petDir\conf.yaml"
 Write-Host "  3) 把 msg-bridge 加进 $petDir\mcp_servers.json（模板：config\mcp_servers.example.json）"
