@@ -1,0 +1,10 @@
+{
+  "//说明": "复制成 config.json 后按你的机器修改；config.json 已被 .gitignore 忽略",
+  "onebot": {
+    "url": "http://127.0.0.1:3000",
+    "token": "<SnowLuma/NapCat 的 Access Token，没设就留空>"
+  },
+  "python_exe": "C:\\你的项目\\pet\\.venv\\Scripts\\python.exe",
+  "pet_root": "C:\\你的项目\\pet",
+  "pet_api": "http://127.0.0.1:12393"
+}

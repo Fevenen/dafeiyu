@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ????????/???????
+bridge/config.json
+config/config.ready.json
+config/mcp_servers.ready.json
+
+# ???????
+bridge/state/
+logs/
+*.log
+
+# ???
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 运行数据
+bridge/_v0/reminders.json
+__pycache__/

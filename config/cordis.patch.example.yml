@@ -1,0 +1,29 @@
+# 把这段追加到：
+#   C:\Users\<你>\.dsh\profiles\desktop\cordis.patch.yml
+# 追加后重启 DSH，新会话里选「大肥鱼（桌宠）」预设。
+#
+# 注意：新条目必须包在 - insert: 里；直接写 - id: 会被当成"覆盖已有条目"，等于没生效。
+
+- insert:
+    - id: preset-dafeiyu
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: dafeiyu
+        name: 大肥鱼（桌宠）
+        description: 只带 QQ/提醒工具的桌宠会话
+        order: 5
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                （把你 AGENTS.md 里的人格文本粘到这里，保持同样的缩进）
+          - id: mcp
+            name: '@deepseek-ai/dsh-mcp-client'
+            config:
+              serverName: pet-bridge
+              transport: stdio
+              command: '<你的 python 路径>\python.exe'
+              args:
+                - '<桌宠目录>\bridge\server.py'
+              toolCallTimeoutMs: 120000
