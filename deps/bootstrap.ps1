@@ -71,6 +71,12 @@ try {
 
 # ---------- 4. SnowLuma ----------
 Write-Host "`n[4/8] SnowLuma（QQ 协议端）"
+$qqProc = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(QQ|QQNT|QQProtect)' }
+if (-not $qqProc) {
+    Warn "没检测到正在运行的 QQ 客户端。"
+    Info "SnowLuma 不负责登录：它注入『已经登录』的 QQ。"
+    Info "先打开官方 QQ 并登录，再运行桌宠（详见 docs/qq-setup.md）"
+}
 if (Test-Path (Join-Path $snowDir "launcher.bat")) {
     Ok "已存在: $snowDir"
 } else {

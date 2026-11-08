@@ -255,6 +255,17 @@ llm_config:
 
 ## 快速开始
 
+### 0. 登录 QQ（必须先做）
+
+SnowLuma **不负责登录**，它注入**已经登录**的 QQ 客户端。
+
+```
+① 打开官方 QQ 客户端，登录你的号（最小化即可，别退出）
+② 再启动 SnowLuma（启动脚本会自动拉起）
+```
+
+详细步骤、验证方法、多账号端口冲突见 **[docs/qq-setup.md](docs/qq-setup.md)**。
+
 ### 1. 准备桌宠
 
 按 Open-LLM-VTuber 文档装好，能正常启动、能说话。
@@ -362,7 +373,7 @@ bridge/
 
 ```
 config\   模板：AGENTS.md / cordis 预设 / mcp_servers / config.json
-docs\     文档：DSH 集成（dsh.md）、人设（persona.md）
+docs\     文档：QQ 登录（qq-setup.md）、DSH 集成（dsh.md）、人设（persona.md）
 deps\     依赖安装（bootstrap.ps1）+ 为什么不能打包
 scripts\  命令行小工具（pet_chat.cmd / run_ws_test.cmd）
 ```
