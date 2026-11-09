@@ -80,5 +80,16 @@ def cancel_send() -> str:
     return tools.cancel_send()
 
 
+@server.tool(
+    description=(
+        "查看最近几条「代码已经替用户执行过」的动作（发消息 / 确认 / 提醒）。"
+        "每次回答前先查一次：如果里面已经有用户这句话的处理结果，就只转述结果，"
+        "不要重复执行，也不要用括号演动作。"
+    )
+)
+def recent_actions(limit: int = 3) -> str:
+    return tools.recent_actions(limit)
+
+
 if __name__ == "__main__":
     server.run("stdio")

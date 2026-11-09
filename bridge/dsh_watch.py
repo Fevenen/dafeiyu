@@ -104,7 +104,7 @@ def clean(text):
     return t.strip()
 
 
-def split_sentences(text, limit=45):
+def split_sentences(text, limit=200):
     parts = re.split(r"(?<=[。！？!?；;\n])", text)
     out, buf = [], ""
     for p in parts:
@@ -158,39 +158,110 @@ def _recent_send_call(seconds: float = 240.0) -> bool:
     return False
 
 
-def fake_success_guard(text: str) -> str:
-    """她说"已经发出去了"，但工具日志里没有记录 → 换成纠正的话。"""
+PSEUDO_CALL = re.compile(r"（调用\s*[A-Za-z_]+）|（使用.{0,12}工具）|正在调用\s*\w+|（正在调用）")
+NEGATIVE_CLAIM = re.compile(r"(没有待确认|没发出去|发不出去|发失败|没有待办|没找到)")
+
+
+def fake_success_guard(text: str, turn_action: str = "", turn_result: str = "") -> str:
+    """双向校验：模型说的和代码做的不一致时，纠正成代码的事实。
+
+    · 说"已发送"但代码没执行 → 纠正
+    · 写"（调用 xxx）"但没真调用 → 纠正
+    · 代码已执行成功，模型却说"没有/没发" → 纠正成代码结果
+    """
+    if PSEUDO_CALL.search(text) and not _recent_send_call():
+        print("   [拦截伪调用] %s" % text[:40], flush=True)
+        return "（停住）等等，本鲸刚才是演给你看的，工具根本没调起来。"
+
     if SEND_CLAIM.search(text) and not _recent_send_call():
         print("   [拦截假成功] 她说发了，但工具没调用：%s" % text[:40], flush=True)
         return "（突然停住）等等……本鲸刚才其实没发出去，工具根本没调起来。主人你再说一次？"
+
+    if turn_action and turn_result and NEGATIVE_CLAIM.search(text):
+        if "已发送" in turn_result or "准备发给" in turn_result:
+            print("   [纠正反向] 代码已处理，模型说没做：%s" % text[:40], flush=True)
+            return turn_result.replace("\n", " ")
+
+    # 模型照抄"准备发给…确认吗"的模板，但根本没有挂起的东西 → 纠正
+    if ("确认吗" in text or "确认发送" in text) and not turn_action:
+        try:
+            from bridge import safety
+
+            pending = safety.get_pending()
+        except Exception:
+            pending = None
+        if not pending:
+            print("   [拦截假挂起] 她说准备好了，但没 pending：%s" % text[:40], flush=True)
+            return "（摊手）本鲸刚才其实没真的准备好，你再说一次：发给谁、说什么？"
+
     return text
 
 
-def _router(prompt: str) -> str:
+def _proxy_alive() -> bool:
+    """KVMem 修复代理在跑的话，命令由它直通执行（这里就不重复执行）。"""
+    import socket
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.3)
+    try:
+        return s.connect_ex(("127.0.0.1", 18080)) == 0
+    except Exception:
+        return False
+    finally:
+        s.close()
+
+
+def _router(prompt: str):
     """明确指令（发消息 / 确认 / 取消 / 提醒 / 查联系人）直接用代码执行。
 
-    返回要说的话；不归它管就返回空字符串，交给模型正常回复。
+    返回 (action, result)。不归它管时返回 ("", "")。
+    注意：这里只执行、不发声 —— 发声统一交给模型（避免两边各说一套）。
+    如果修复代理在跑，执行权归代理（避免同一条命令执行两次）。
     """
     p = (prompt or "").strip()
     if not p:
-        return ""
+        return "", ""
+    if _proxy_alive():
+        return "", ""
     try:
         from bridge import fastpath, safety, tools
     except Exception as e:
         print("   [路由] 导入 bridge 失败：%s" % e, flush=True)
-        return ""
+        return "", ""
     try:
         if safety.get_pending():
             if safety.is_confirm(p):
-                return tools.confirm_send()
+                reply = tools.confirm_send()
+                _log_action(p, "confirm_send", reply)
+                return "confirm_send", reply
             if safety.is_cancel(p):
-                return tools.cancel_send()
+                reply = tools.cancel_send()
+                _log_action(p, "cancel_send", reply)
+                return "cancel_send", reply
         handled, reply = fastpath.try_handle(p)
         if handled and reply:
-            return reply
+            _log_action(p, "fastpath", reply)
+            return "fastpath", reply
     except Exception as e:
         print("   [路由] 执行失败：%s" % e, flush=True)
-    return ""
+    return "", ""
+
+
+def _log_action(prompt: str, action: str, result: str) -> None:
+    """把代码已经做过的动作记下来，供模型通过 recent_actions 查询。"""
+    try:
+        path = os.path.join(HERE, "state", "router_log.jsonl")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        rec = {
+            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "prompt": prompt[:120],
+            "action": action,
+            "result": (result or "")[:200],
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def main():
@@ -258,26 +329,44 @@ def main():
     spoken = state.get(path, {}).get("spoken", "")
     last_resp = ""
     stable = 0
-    handled_turn = 0
     last_check = 0.0
     ENDS = "。！？!?；;\n"
+    turn_action, turn_result = "", ""
+    handled_turn = 0
+    emitted = set()
 
     def emit(chunk: str, turn_no: int) -> None:
+        piece_key = (turn_no, hash(chunk))
+        if piece_key in emitted:
+            return
+        emitted.add(piece_key)
         pieces = split_sentences(clean(chunk))
         if not pieces:
             return
-        print("第 %d 轮：念 %d 句" % (turn_no, len(pieces)), flush=True)
+        # 第一句立刻念（尽早出声），后面按 70 字左右合并（减少调用次数、句间不空档）
+        batches = [pieces[0]]
+        buf = ""
+        for p in pieces[1:]:
+            if buf and len(buf) + len(p) > 70:
+                batches.append(buf)
+                buf = p
+            else:
+                buf = (buf + p) if buf else p
+        if buf:
+            batches.append(buf)
+
+        print("第 %d 轮：念 %d 块（%d 句）" % (turn_no, len(batches), len(pieces)), flush=True)
         if args.dry:
-            for p in pieces:
-                print("   [dry]", p, flush=True)
+            for b in batches:
+                print("   [dry]", b, flush=True)
             return
-        for p in pieces:
-            p = fake_success_guard(p)
+        for b in batches:
+            b = fake_success_guard(b, turn_action, turn_result)
             try:
-                say(p)
+                say(b)
             except Exception as e:
                 print("   念失败：%s" % str(e)[:80], flush=True)
-            time.sleep(0.15)
+            time.sleep(0.05)
 
     while True:
         # --dir 模式：每 3 秒看看有没有新会话，有就切过去
@@ -288,7 +377,10 @@ def main():
                 path = new_path
                 last_turn = state.get(path, {}).get("turn", 0)
                 spoken = state.get(path, {}).get("spoken", "")
-                last_resp, stable, handled_turn = "", 0, 0
+                last_resp, stable = "", 0
+                turn_action, turn_result = "", ""
+                handled_turn = 0
+                emitted.clear()
                 print("切换到新会话：%s" % os.path.basename(path), flush=True)
         if not path:
             time.sleep(1)
@@ -304,11 +396,13 @@ def main():
                 last_turn = turn_no
                 spoken = ""
                 stable = 0
-                # 明确的指令（发消息/确认/提醒）由代码直接做，不信模型的嘴
-                router_reply = _router(cur.get("prompt") or "")
-                if router_reply:
-                    print("[路由] 代码处理：%s" % router_reply.replace("\n", " ")[:50], flush=True)
-                    emit(router_reply, turn_no)
+                emitted.clear()
+                handled_turn = 0
+                # 明确指令由代码执行；执行了就由代码发声（模型那轮的文字不念）
+                turn_action, turn_result = _router(cur.get("prompt") or "")
+                if turn_action:
+                    print("[路由] 已执行：%s -> %s" % (turn_action, turn_result.replace("\n", " ")[:60]), flush=True)
+                    emit(turn_result, turn_no)
                     handled_turn = turn_no
 
             # 回复被改写（不是继续变长）→ 重新念

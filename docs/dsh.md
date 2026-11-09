@@ -215,3 +215,29 @@ Get-NetTCPConnection -LocalPort 3000 -State Listen
 5. 说："1小时后提醒我喝水"
    → 到点 QQ 收到 + 她主动开口
 ```
+
+---
+
+## 实验：ACP 流式（可选）
+
+DSH 自带 ACP 服务（stdio），可以用子进程直接对话：
+
+``powershell
+# 以 Node 模式跑 dsh CLI
+$env:ELECTRON_RUN_AS_NODE = "1"
+& "D:\软件库\dsharness\DeepSeek Harness.exe" `
+  "D:\软件库\dsharness\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js" `
+  --profile acp --help
+``
+
+协议：JSON-RPC 2.0，方法 `initialize` / `session/new` / `session/prompt` / `session/update`。
+
+`bridge/acp_client.py` 是一个最小客户端；`bridge/acp_pet.patch.yml` 把 ACP profile 的默认模型从
+`deepseek-official` 改成 `kvmem`（否则会报 no API key）。
+
+**实测结论（2026-11）：**
+
+- 握手、建会话、选择模型都正常
+- 但 `agent_message_chunk` 是**整段一次性返回**（kvmem 不流式），
+  所以并不能做到"边生成边说话"
+- 结论：**读会话文件的方案在当前模型下效果相当**，ACP 留作将来换流式模型时的备选

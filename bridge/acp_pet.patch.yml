@@ -1,0 +1,31 @@
+# ACP 专用补丁：让 acp profile 用本地 KVMem 模型（不动 desktop profile）
+#
+# 用法：
+#   dsh --profile acp --patch <这个文件>
+#
+# 关键点：
+#   acp profile 里 `- id: acp` 写死了 provider: deepseek-official
+#   必须覆盖这一条，否则无论会话里怎么选模型，都还是走 deepseek 官方路由
+
+- id: acp
+  name: '@deepseek-ai/dsh-acp'
+  config:
+    provider: kvmem
+    model: kvmem-polystrata-qwen35
+
+- id: agent-default-model
+  config:
+    provider: kvmem
+    model: kvmem-polystrata-qwen35
+
+- id: llm-pi-ai
+  config:
+    providers:
+      kvmem:
+        displayName: KVMem 本地
+        apiKeyEnv: KVMEM_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:18200/v1
+        models:
+          - id: kvmem-polystrata-qwen35
+            name: kvmem-polystrata-qwen35

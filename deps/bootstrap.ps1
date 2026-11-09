@@ -47,6 +47,15 @@ if ($missing.Count -gt 0) {
 }
 Ok "git / python / uv 都在"
 
+# ffmpeg：edge-tts 转 wav 要用，没有就提示（不强制）
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+    Warn "没找到 ffmpeg（edge-tts 需要它把 mp3 转 wav）"
+    Info "安装：winget install --id Gyan.FFmpeg -e  装完重开终端"
+    Info "或者：用 sherpa 本地音色（不需要 ffmpeg，见 docs/tts.md）"
+} else {
+    Ok "ffmpeg 已安装"
+}
+
 # ---------- 2. 桌宠本体 ----------
 Write-Host "`n[2/8] Open-LLM-VTuber"
 if (Test-Path (Join-Path $petDir "run_server.py")) {
@@ -156,6 +165,14 @@ $confTpl = Join-Path $petDir "config_templates\conf.default.yaml"
 if ((-not (Test-Path $confPath)) -and (Test-Path $confTpl)) {
     Copy-Item $confTpl $confPath
     Ok "已从模板生成 conf.yaml（记得填模型/API key）"
+}
+# 默认语音改成 edge-tts + 晓伊（需要 ffmpeg；没有会用 sherpa，见 docs/tts.md）
+if (Test-Path $confPath) {
+    $txt = Get-Content $confPath -Raw -Encoding UTF8
+    $txt = $txt -replace "(?m)^(\s*)tts_model:\s*'[^']*'", "`$1tts_model: 'edge_tts'"
+    $txt = $txt -replace "zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"
+    Set-Content -Path $confPath -Value $txt -Encoding UTF8 -NoNewline
+    Ok "语音默认：edge-tts / zh-CN-XiaoyiNeural（晓伊）"
 }
 
 $cfgPath = Join-Path $bridgeDst "config.json"

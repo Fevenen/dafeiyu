@@ -131,6 +131,31 @@ powershell -ExecutionPolicy Bypass -File .\deps\bootstrap.ps1
 
 > 语音和形象也可以用**免费替代**：`edge-tts` + 桌宠自带的 Live2D 模型。
 
+### 语音：推荐 edge-tts（更自然）
+
+作者当前使用的是 **`edge-tts` + `zh-CN-XiaoyiNeural`（晓伊，活泼女声）**，比本地 VITS 自然很多。
+
+```yaml
+tts_config:
+  tts_model: 'edge_tts'
+  edge_tts:
+    voice: 'zh-CN-XiaoyiNeural'
+```
+
+**需要两样东西：**
+
+```powershell
+# 1. edge-tts 库（>= 7.3.1，旧版会 403）
+uv pip install -U edge-tts
+
+# 2. ffmpeg（edge 输出 mp3，桌宠要转 wav）
+winget install --id Gyan.FFmpeg -e
+```
+
+> 详细说明（音色清单、试听、排查 403 / 转换失败）见 **[docs/tts.md](docs/tts.md)**。
+
+想完全离线、不装 ffmpeg → 用下面的 sherpa 音色（自然度差一档）。
+
 ### 启用完整资产（改 conf.yaml）
 
 附件解压后，在 `pet\conf.yaml` 里确认这几项：
@@ -373,9 +398,10 @@ bridge/
 
 ```
 config\   模板：AGENTS.md / cordis 预设 / mcp_servers / config.json
-docs\     文档：QQ 登录（qq-setup.md）、DSH 集成（dsh.md）、人设（persona.md）
+docs\     文档：QQ 登录、语音（tts.md）、DSH 集成、人设
 deps\     依赖安装（bootstrap.ps1）+ 为什么不能打包
 scripts\  命令行小工具（pet_chat.cmd / run_ws_test.cmd）
+sync.ps1  把 pet\bridge 同步到发布仓库
 ```
 
 ## 7 个工具
@@ -413,7 +439,32 @@ SnowLuma 没开 / 没登录。`bridge` 会自动重拉一次好友列表；仍�
 
 **Q：她突然不说话了？**
 
-`dsh_watch.py` 进程挂了。重跑启动脚本即可（脚本会检查并补起）。日志：`logs/watch.out`。
+先按顺序查：
+
+1. `dsh_watch.py` 进程还在吗（挂了就重跑启动脚本，日志：`logs/watch.out`）
+2. 后端 12393 在监听吗
+3. **监听地址是 `127.0.0.1` 还是 `::1`** ← 最常见的坑
+
+**监听器日志出现这种错误：**
+
+```
+念失败：<urlopen error [WinError 10061] 由于目标计算机积极拒绝>
+```
+
+**但端口明明在监听** → 说明后端只绑了 IPv6。
+
+**原因**：`conf.yaml` 里写的是 `host: 'localhost'`，这台机器把它解析成 `::1`，
+而 bridge 连的是 `127.0.0.1`（IPv4），所以连不上。
+
+**修法**：
+
+```yaml
+# pet\conf.yaml
+system_config:
+  host: '127.0.0.1'    # 不要用 localhost
+```
+
+改完重启后端。
 
 **Q：很慢？**
 
@@ -424,6 +475,22 @@ SnowLuma 没开 / 没登录。`bridge` 会自动重拉一次好友列表；仍�
 **Q：确认/取消没反应？**
 
 确认词表在 `safety.py` 的 `is_confirm` / `is_cancel`，可按需扩充。
+
+---
+
+## 不要删的文件
+
+整理目录时**千万别删**这些，删了桌宠会出问题：
+
+| 文件/目录 | 删了会怎样 |
+|---|---|
+| `pet\model_dict.json` | **Live2D 模型加载失败 → 窗口空白**（后端报 `'NoneType' object has no attribute 'emo_str'`） |
+| `pet\live2d-models\` | 同上，没有形象 |
+| `pet\models\` | 没有声音（TTS/ASR 模型） |
+| `pet\bridge\_v0\` | 联系/发送/提醒全废 |
+| `pet\bridge\config.json` | 连不上 QQ（OneBot 地址/token 丢了） |
+
+**可以安全删的**：`cache\`、`logs\`、`bridge\state\`、`__pycache__\`、`*.bak`。
 
 ---
 
@@ -475,3 +542,26 @@ SnowLuma 没开 / 没登录。`bridge` 会自动重拉一次好友列表；仍�
 - [ ] 提醒的"推迟 10 分钟"
 - [ ] 语音输入（ASR）→ DSH 的完整链路
 - [ ] 监视页（浏览器里看对话）
+
+## 本地模型：工具调用修复代理（可选）
+
+本地模型（如 `kvmem-polystrata-qwen35`）经常把工具调用写成文字（「（调用 send_qq_message）」），
+不会真的返回 `tool_calls`，于是 DSH 里显示的是模型编的话。
+
+`bridge/kvmem_proxy.py` 夹在 DSH 和 KVMem 之间，做两件事：
+
+- 删掉「（调用 xxx）」这类旁白
+- 模型没给工具调用、但用户这句话明显是命令 → 自动补上 `tool_calls`
+
+**用法：**
+
+```powershell
+# 1. 起代理（监听 127.0.0.1:18080）
+D:\coding\python\pythonw.exe bridge\kvmem_proxy.py
+
+# 2. 把 DSH 的 kvmem provider 指向代理
+#    ~\.dsh\profiles\desktop\cordis.patch.yml
+#      baseURL: http://127.0.0.1:18080/v1
+```
+
+`启动桌宠客户端.cmd` 会自动检查并拉起这个代理。

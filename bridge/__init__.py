@@ -1,14 +1,18 @@
-"""桌宠消息/提醒桥接。
+"""把 v0（消息助手）的现成能力接进桌宠。
 
-不再依赖外部的 v0 项目：需要的模块已经内置在 _v0\ 里。
+这个包里所有模块都复用 D:\\project\\MP\\v0\\assistant 下的代码：
+  config / vault / sender / reminders / when / name_match
+不重新实现发送、解析、匹配逻辑。
 """
 
 import os
+import sys
 
+V0_ASSISTANT = r"D:\project\MP\v0\assistant"
 BRIDGE_DIR = os.path.dirname(os.path.abspath(__file__))
-PET_ROOT = os.path.dirname(BRIDGE_DIR)
 STATE_DIR = os.path.join(BRIDGE_DIR, "state")
-LOG_DIR = os.path.join(BRIDGE_DIR, "logs")
 
 os.makedirs(STATE_DIR, exist_ok=True)
-os.makedirs(LOG_DIR, exist_ok=True)
+
+if V0_ASSISTANT not in sys.path:
+    sys.path.insert(0, V0_ASSISTANT)
