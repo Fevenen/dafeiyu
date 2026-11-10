@@ -6,28 +6,38 @@
 
 import json
 import os
+from .. import settings
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # pet\bridge
-LOG_DIR = os.path.join(BASE, "logs")
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # pet\bridge
+LOG_DIR = str(settings.LOG_DIR)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 _CFG_FILE = os.path.join(BASE, "config.json")
 
 _KEYS = (
-    "LLM_API_KEY", "LLM_BASE", "LLM_MODEL",
-    "ONEBOT_URL", "ONEBOT_TOKEN",
-    "NAPCAT_URL", "NAPCAT_TOKEN",
-    "DRY_RUN", "CONFIRM_TIMEOUT", "VAULT_TOKEN_TTL", "MAX_SEND_PER_MINUTE",
-    "GREETING", "GREETING_ASCII", "VAULT_RESOLVE_PER_MINUTE",
+    "LLM_API_KEY",
+    "LLM_BASE",
+    "LLM_MODEL",
+    "ONEBOT_URL",
+    "ONEBOT_TOKEN",
+    "NAPCAT_URL",
+    "NAPCAT_TOKEN",
+    "DRY_RUN",
+    "CONFIRM_TIMEOUT",
+    "VAULT_TOKEN_TTL",
+    "MAX_SEND_PER_MINUTE",
+    "GREETING",
+    "GREETING_ASCII",
+    "VAULT_RESOLVE_PER_MINUTE",
 )
 
 
 def load():
     cfg = {}
     # 1) bridge/config.json
-    if os.path.exists(_CFG_FILE):
+    if settings.CONFIG_PATH.exists():
         try:
-            with open(_CFG_FILE, encoding="utf-8") as f:
+            with open(settings.CONFIG_PATH, encoding="utf-8-sig") as f:
                 data = json.load(f)
             # 允许两种写法：扁平键 或 嵌套 onebot 段
             if isinstance(data, dict):
@@ -62,7 +72,9 @@ def int_cfg(name, default):
 
 
 def onebot_url() -> str:
-    url = config.get("ONEBOT_URL") or config.get("NAPCAT_URL") or "http://127.0.0.1:3000"
+    url = (
+        config.get("ONEBOT_URL") or config.get("NAPCAT_URL") or "http://127.0.0.1:3000"
+    )
     return str(url).rstrip("/")
 
 

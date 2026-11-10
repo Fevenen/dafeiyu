@@ -18,16 +18,18 @@ DSH 里添加一个自定义模型提供商：
 import json
 import os
 import sys
-import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PET = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PET_API = "http://127.0.0.1:12393"
+sys.path.insert(0, PET)
+from bridge.settings import PET_API, LOG_DIR
+from bridge.net import urlopen
+
 PORT = 18201
 MODEL_ID = "dafeiyu"
-LOG = os.path.join(PET, "logs", "shim.log")
+LOG = str(LOG_DIR / "shim.log")
 
 
 def log(msg: str) -> None:
@@ -42,7 +44,7 @@ def log(msg: str) -> None:
 
 
 def _get(path: str, timeout: float = 20):
-    with urllib.request.urlopen(PET_API + path, timeout=timeout) as r:
+    with urlopen(PET_API + path, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
@@ -51,7 +53,7 @@ def _post(path: str, payload: dict, timeout: float = 30):
     req = urllib.request.Request(
         PET_API + path, data=body, headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
@@ -189,12 +191,12 @@ class Handler(BaseHTTPRequestHandler):
                 "object": "chat.completion.chunk",
                 "created": created,
                 "model": model,
-                "choices": [
-                    {"index": 0, "delta": delta, "finish_reason": finish}
-                ],
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
             }
             self.wfile.write(
-                ("data: " + json.dumps(payload, ensure_ascii=False) + "\n\n").encode("utf-8")
+                ("data: " + json.dumps(payload, ensure_ascii=False) + "\n\n").encode(
+                    "utf-8"
+                )
             )
             self.wfile.flush()
 

@@ -32,7 +32,9 @@ def ocr(s: str) -> str:
 
 # ---------------- 群聊识别 ----------------
 
-_GROUP_WORDS = re.compile(r"群聊|交流群|互助群|通知群|工作群|家族群|同乡群|部门群|讨论组")
+_GROUP_WORDS = re.compile(
+    r"群聊|交流群|互助群|通知群|工作群|家族群|同乡群|部门群|讨论组"
+)
 
 
 def is_group_like(s: str) -> bool:
@@ -53,6 +55,7 @@ def is_group_like(s: str) -> bool:
 
 # ---------------- 严格比对 ----------------
 
+
 def _strict(display: str, hint: str, norm) -> bool:
     """hint 能不能唯一确定 display。"""
     display = (display or "").strip()
@@ -70,7 +73,7 @@ def _strict(display: str, hint: str, norm) -> bool:
 
     # hint 是前缀，且后面不能紧跟名字字符（防 张三 → 张三丰）
     if nd.startswith(nh):
-        tail = nd[len(nh):]
+        tail = nd[len(nh) :]
         if tail and _NON_WORD.match(tail[0]):
             return False
         return True
@@ -83,6 +86,7 @@ def strict_ok(display: str, hint: str) -> bool:
 
 
 # ---------------- 候选打分 ----------------
+
 
 def score(candidate: str, query: str) -> tuple:
     """给一个候选名字打分，返回 (分数, 理由)。
@@ -115,6 +119,7 @@ def score(candidate: str, query: str) -> tuple:
 
     try:
         from pypinyin import lazy_pinyin
+
         cp = "".join(lazy_pinyin(candidate)).lower()
         ci = "".join(p[0] for p in lazy_pinyin(candidate)).lower()
         if q == cp:
@@ -126,6 +131,7 @@ def score(candidate: str, query: str) -> tuple:
 
     try:
         from rapidfuzz import fuzz
+
         r = fuzz.ratio(q, c)
         if r >= 80:
             return int(r * 0.8), "模糊匹配"

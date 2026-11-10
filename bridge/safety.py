@@ -4,21 +4,30 @@
 模型抽出来的名字/时间，必须先过这里，才能变成真正动作。
 """
 
-import json
-import os
-import time
-
-from . import STATE_DIR
-from .v0_load import name_match, reminders, vault, when
-
-PENDING_FILE = os.path.join(STATE_DIR, "pending.json")
+from .v0_load import name_match, vault, when
+from . import store
+from ._v0.config import int_cfg
 
 # 确认 / 取消 的判定词（纯规则，不走模型）
-_CONFIRM_WORDS = ("确认", "确定", "发吧", "发", "好的", "好", "嗯", "可以", "发送", "行", "ok", "OK")
+_CONFIRM_WORDS = (
+    "确认",
+    "确定",
+    "发吧",
+    "发",
+    "好的",
+    "好",
+    "嗯",
+    "可以",
+    "发送",
+    "行",
+    "ok",
+    "OK",
+)
 _CANCEL_WORDS = ("取消", "算了", "别发", "不发了", "不用了", "不要", "停", "不了")
 
 
 # ---------------- 联系人 ----------------
+
 
 def _contact_by_display(display: str):
     for c in getattr(vault(), "contacts", []):
@@ -42,7 +51,7 @@ def ensure_contacts(force: bool = False) -> int:
         return 0
 
 
-def list_contacts(query: str = "", limit: int = 20) -> list:
+def list_contacts(query: str = "", limit: int = 0) -> list:
     ensure_contacts()
     q = (query or "").strip().lower()
     out = []
@@ -50,8 +59,10 @@ def list_contacts(query: str = "", limit: int = 20) -> list:
         name = c.remark or c.nickname or str(c.user_id)
         if q and q not in name.lower() and q not in str(c.user_id):
             continue
-        out.append({"name": name, "uid": c.user_id, "remark": c.remark, "nickname": c.nickname})
-    return out[:limit]
+        out.append(
+            {"name": name, "uid": c.user_id, "remark": c.remark, "nickname": c.nickname}
+        )
+    return out[:limit] if limit else out
 
 
 def resolve_contact(hint: str):
@@ -82,7 +93,9 @@ def resolve_contact(hint: str):
             return None, "QQ 这边没连上（SnowLuma 没开或没登录），好友列表拉不到", []
         return None, f"没找到「{hint}」这个人（QQ 好友里没有）", []
 
-    strict = [c for c in cands if c.score >= 90 and name_match().strict_ok(c.display, hint)]
+    strict = [
+        c for c in cands if c.score >= 90 and name_match().strict_ok(c.display, hint)
+    ]
     if len(strict) == 1:
         c = _contact_by_display(strict[0].display)
         if c:
@@ -92,12 +105,15 @@ def resolve_contact(hint: str):
     if len(strict) > 1:
         return None, "", [{"name": c.display, "score": c.score} for c in strict]
 
-    return None, f"「{hint}」匹配不确定（最像的是「{cands[0].display}」，{cands[0].score} 分）", [
-        {"name": c.display, "score": c.score} for c in cands[:5]
-    ]
+    return (
+        None,
+        f"「{hint}」匹配不确定（最像的是「{cands[0].display}」，{cands[0].score} 分）",
+        [{"name": c.display, "score": c.score} for c in cands[:5]],
+    )
 
 
 # ---------------- 时间 ----------------
+
 
 def parse_time(time_text: str):
     """返回 (datetime, 剩余文字)。解析不出来返回 (None, 原文)。"""
@@ -116,54 +132,27 @@ def human_time(dt) -> str:
 
 # ---------------- 待确认状态（跨进程：写文件） ----------------
 
-def _read_pending() -> dict:
-    try:
-        with open(PENDING_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        if data and time.time() - float(data.get("ts", 0)) < 300:   # 5 分钟过期
-            return data
-    except Exception:
-        pass
-    return {}
-
-
-def _write_pending(data: dict) -> None:
-    os.makedirs(STATE_DIR, exist_ok=True)
-    tmp = PENDING_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-    os.replace(tmp, PENDING_FILE)
-
 
 def set_pending(uid: int, name: str, text: str) -> dict:
-    data = {"uid": int(uid), "name": name, "text": text, "ts": time.time()}
-    _write_pending(data)
-    return data
+    return store.prepare(int(uid), name, text, int_cfg("CONFIRM_TIMEOUT", 300))
 
 
 def get_pending() -> dict:
-    return _read_pending()
+    return store.pending(int_cfg("CONFIRM_TIMEOUT", 300))
 
 
 def clear_pending() -> None:
-    try:
-        os.remove(PENDING_FILE)
-    except FileNotFoundError:
-        pass
+    store.cancel()
 
 
 # ---------------- 确认 / 取消 判定 ----------------
 
+
 def is_confirm(text: str) -> bool:
-    t = (text or "").strip().lower()
-    if not t or len(t) > 8:
-        # 长句子不算"纯确认"，交给模型理解
-        return False
-    return any(w.lower() == t or (len(t) <= 4 and t.startswith(w.lower())) for w in _CONFIRM_WORDS)
+    t = (text or "").strip().lower().rstrip("。！!，, ")
+    return t in {w.lower() for w in _CONFIRM_WORDS}
 
 
 def is_cancel(text: str) -> bool:
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    return any(w.lower() in t for w in _CANCEL_WORDS)
+    t = (text or "").strip().lower().rstrip("。！!，, ")
+    return t in {w.lower() for w in _CANCEL_WORDS}

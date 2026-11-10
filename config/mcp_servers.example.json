@@ -1,9 +1,9 @@
 {
   "mcp_servers": {
     "msg-bridge": {
-      "command": "<你的 python 路径>\\python.exe",
+      "command": "<PYTHON_EXE>",
       "args": [
-        "<桌宠目录>\\bridge\\server.py"
+        "<BRIDGE_SERVER>"
       ]
     }
   }

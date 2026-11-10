@@ -1,0 +1,4 @@
+requests>=2.32,<3
+pypinyin>=0.50,<1
+rapidfuzz>=3,<4
+mcp>=1.6,<3

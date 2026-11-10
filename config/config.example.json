@@ -1,10 +1,16 @@
 {
-  "//说明": "复制成 config.json 后按你的机器修改；config.json 已被 .gitignore 忽略",
+  "pet_root": "..",
+  "pet_data_dir": "data",
+  "workspace": "../../pet_workspace",
+  "pet_api": "http://127.0.0.1:12393",
   "onebot": {
     "url": "http://127.0.0.1:3000",
-    "token": "<SnowLuma/NapCat 的 Access Token，没设就留空>"
+    "token": ""
   },
-  "python_exe": "C:\\你的项目\\pet\\.venv\\Scripts\\python.exe",
-  "pet_root": "C:\\你的项目\\pet",
-  "pet_api": "http://127.0.0.1:12393"
+  "kvmem_upstream": "http://127.0.0.1:18200",
+  "kvmem_proxy_port": 18080,
+  "kvmem_keep_messages": 10,
+  "confirm_timeout": 300,
+  "desktop_client": "",
+  "snowluma_launcher": ""
 }

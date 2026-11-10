@@ -4,7 +4,7 @@ import asyncio
 import io
 import sys
 
-sys.path.insert(0, r"D:\project\MP\pet\bridge")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 
 from ws_test import talk  # noqa: E402
 
@@ -20,13 +20,24 @@ CASES = [
 
 
 async def main():
-    out = io.open(r"D:\project\MP\pet\logs\suite.log", "w", encoding="utf-8")
+    out = io.open(
+        str(
+            __import__("pathlib").Path(__file__).resolve().parents[1] / "logs/suite.log"
+        ),
+        "w",
+        encoding="utf-8",
+    )
     for i, (text, expect) in enumerate(CASES, 1):
         try:
             reply = await talk(text, wait=100.0)
         except Exception as e:
             reply = "[异常] %s: %s" % (type(e).__name__, e)
-        line = "%d. 你：%s\n   预期：%s\n   她：%s\n" % (i, text, expect, reply or "（没回复）")
+        line = "%d. 你：%s\n   预期：%s\n   她：%s\n" % (
+            i,
+            text,
+            expect,
+            reply or "（没回复）",
+        )
         print(line, flush=True)
         out.write(line + "\n")
         out.flush()

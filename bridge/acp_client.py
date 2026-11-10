@@ -14,19 +14,18 @@
 
 import json
 import os
-import queue
 import subprocess
 import sys
 import threading
 import time
 
-EXE = os.environ.get(
-    "DSH_EXE", r"D:\软件库\dsharness\DeepSeek Harness.exe"
-)
-BIN = os.environ.get(
-    "DSH_BIN",
-    r"D:\软件库\dsharness\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js",
-)
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from bridge import settings
+
+EXE = str(settings.get("dsh_exe", ""))
+BIN = str(settings.get("dsh_bin", ""))
 
 
 class ACPError(Exception):
@@ -45,13 +44,17 @@ class ACPClient:
         self._pending = {}
         self._lock = threading.Lock()
         self.session_id = None
-        self.on_chunk = None          # callable(text)
-        self.on_event = None          # callable(kind, payload)
+        self.on_chunk = None  # callable(text)
+        self.on_event = None  # callable(kind, payload)
         self._reader = None
         self._stderr_lines = []
 
     # ---------- 进程 ----------
     def start(self, timeout: float = 20.0):
+        if not EXE or not BIN:
+            raise ACPError(
+                "Configure DSH_EXE and DSH_BIN before using experimental ACP"
+            )
         env = dict(os.environ)
         env["ELECTRON_RUN_AS_NODE"] = "1"
         args = [EXE, BIN, "--profile", self.profile]
@@ -121,7 +124,7 @@ class ACPClient:
             upd = (msg.get("params") or {}).get("update") or {}
             kind = upd.get("sessionUpdate")
             if kind == "agent_message_chunk":
-                text = ((upd.get("content") or {}).get("text") or "")
+                text = (upd.get("content") or {}).get("text") or ""
                 if self.on_chunk:
                     self.on_chunk(text)
             if self.on_event:
@@ -139,13 +142,20 @@ class ACPClient:
             options = params.get("options") or []
             chosen = None
             for opt in options:
-                if str(opt.get("kind", "")).lower() in ("reject", "reject_once", "deny"):
+                if str(opt.get("kind", "")).lower() in (
+                    "reject",
+                    "reject_once",
+                    "deny",
+                ):
                     chosen = opt.get("optionId")
                     break
             if chosen is None:
-                chosen = (options[0].get("optionId") if options else None)
-            resp = {"jsonrpc": "2.0", "id": req_id,
-                    "result": {"outcome": {"outcome": "selected", "optionId": chosen}}}
+                chosen = options[0].get("optionId") if options else None
+            resp = {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"outcome": {"outcome": "selected", "optionId": chosen}},
+            }
             self.proc.stdin.write(json.dumps(resp) + "\n")
             self.proc.stdin.flush()
         except Exception:
@@ -165,14 +175,20 @@ class ACPClient:
             raise ACPError("请求超时：%s" % method)
         msg = box["result"] or {}
         if "error" in msg:
-            raise ACPError("%s 出错：%s" % (method, json.dumps(msg["error"], ensure_ascii=False)))
+            raise ACPError(
+                "%s 出错：%s" % (method, json.dumps(msg["error"], ensure_ascii=False))
+            )
         return msg.get("result") or {}
 
     def new_session(self):
-        res = self.request("session/new", {"cwd": self.cwd, "mcpServers": []}, timeout=30)
+        res = self.request(
+            "session/new", {"cwd": self.cwd, "mcpServers": []}, timeout=30
+        )
         self.session_id = res.get("sessionId")
         if not self.session_id:
-            raise ACPError("没拿到 sessionId：%s" % json.dumps(res, ensure_ascii=False)[:200])
+            raise ACPError(
+                "没拿到 sessionId：%s" % json.dumps(res, ensure_ascii=False)[:200]
+            )
         return self.session_id
 
     def prompt(self, text: str, timeout: float = 120.0):
@@ -195,7 +211,13 @@ class ACPClient:
 def main():
     text = sys.argv[1] if len(sys.argv) > 1 else "用一句话打个招呼"
     raw = "--json" in sys.argv
-    client = ACPClient(cwd=r"D:\project\MP\pet_workspace")
+    client = ACPClient(
+        cwd=str(
+            settings.path(
+                "workspace", settings.BRIDGE_ROOT.parent.parent / "pet_workspace"
+            )
+        )
+    )
     agent, proto = client.start()
     print("  agent:", agent, " protocol:", proto, flush=True)
     sid = client.new_session()
@@ -214,7 +236,10 @@ def main():
     t0 = time.time()
     try:
         res = client.prompt(text, timeout=90)
-        print("  完成 %.1fs  stopReason=%s" % (time.time() - t0, res.get("stopReason")), flush=True)
+        print(
+            "  完成 %.1fs  stopReason=%s" % (time.time() - t0, res.get("stopReason")),
+            flush=True,
+        )
     except Exception as e:
         print("  失败:", e, flush=True)
         print("  stderr:", client.stderr_tail(), flush=True)

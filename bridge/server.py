@@ -1,11 +1,12 @@
 r"""server.py — MCP stdio 服务：把消息助手的能力暴露给桌宠的模型。
 
 启动方式（由 pet\mcp_servers.json 指定）：
-    D:\coding\python\python.exe D:\project\MP\pet\bridge\server.py
+    python -m bridge.server
 """
 
 import os
 import sys
+import uuid
 
 # 让 `import bridge.xxx` 能找到本文件所在的上一级目录（pet\）
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -13,9 +14,16 @@ _PET = os.path.dirname(_HERE)
 if _PET not in sys.path:
     sys.path.insert(0, _PET)
 
-from mcp.server.mcpserver import MCPServer  # noqa: E402
+try:
+    from mcp.server.mcpserver import MCPServer
+except ImportError:
+    from mcp.server.fastmcp import FastMCP as MCPServer
 
 from bridge import tools  # noqa: E402
+from bridge.context import scope, session_id
+
+# Each stdio process owns a scope unless the installer/client sets an explicit ID.
+os.environ.setdefault("BRIDGE_SESSION_ID", "mcp:" + uuid.uuid4().hex)
 
 server = MCPServer("msg-bridge")
 
@@ -56,7 +64,9 @@ def list_reminders() -> str:
     return tools.list_reminders()
 
 
-@server.tool(description="取消提醒。keyword 是要取消的提醒内容里的关键词（留空则先列出全部）。")
+@server.tool(
+    description="取消提醒。keyword 是要取消的提醒内容里的关键词（留空则先列出全部）。"
+)
 def cancel_reminder(keyword: str = "") -> str:
     return tools.cancel_reminder(keyword)
 
@@ -67,8 +77,10 @@ def cancel_reminder(keyword: str = "") -> str:
         "只有刚调用过 send_qq_message 之后才有效。"
     )
 )
-def confirm_send() -> str:
-    return tools.confirm_send()
+def confirm_send(confirmation: str) -> str:
+    """confirmation 必须原样填写用户本轮的确认文字，不得自行编写。"""
+    with scope(session_id(), text=confirmation):
+        return tools.confirm_send()
 
 
 @server.tool(
@@ -83,12 +95,34 @@ def cancel_send() -> str:
 @server.tool(
     description=(
         "查看最近几条「代码已经替用户执行过」的动作（发消息 / 确认 / 提醒）。"
-        "每次回答前先查一次：如果里面已经有用户这句话的处理结果，就只转述结果，"
-        "不要重复执行，也不要用括号演动作。"
+        "只在需要核对执行状态时调用；普通聊天无需查询。不要把历史结果当作本轮请求的结果。"
     )
 )
 def recent_actions(limit: int = 3) -> str:
     return tools.recent_actions(limit)
+
+
+@server.tool(description="列出已注册的桌宠能力及其用途，不执行任何动作。")
+def list_capabilities() -> str:
+    import json
+    from bridge.capabilities import describe
+
+    return json.dumps(describe(), ensure_ascii=False)
+
+
+@server.tool(
+    description="统一处理桌宠命令。text 原样填写本轮用户的话；request_id 同一轮重试保持相同，不同轮必须不同。"
+)
+def route_command(text: str, request_id: str = "") -> str:
+    from bridge.router import route
+
+    with scope(session_id(), request_id or None, text):
+        result = route(text)
+    return (
+        result
+        if result is not None
+        else "未识别出明确命令；请正常回答或询问用户所需操作。"
+    )
 
 
 if __name__ == "__main__":

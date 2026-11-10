@@ -10,8 +10,22 @@
 import re
 from datetime import datetime, timedelta
 
-_CN_NUM = {"零": 0, "一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
-           "六": 6, "七": 7, "八": 8, "九": 9, "十": 10, "十一": 11, "十二": 12}
+_CN_NUM = {
+    "零": 0,
+    "一": 1,
+    "两": 2,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    "十一": 11,
+    "十二": 12,
+}
 
 
 def _num(s: str, default=None):
@@ -23,12 +37,16 @@ def _num(s: str, default=None):
     return _CN_NUM.get(s, default)
 
 
-_REL = re.compile(r"(半\s*个?\s*小时|(\d+|[一二两三四五六七八九十]+)\s*(?:个)?\s*(分钟|分|小时|钟头|天))\s*(?:之后|以后|后)?")
+_REL = re.compile(
+    r"(半\s*个?\s*小时|(\d+|[一二两三四五六七八九十]+)\s*(?:个)?\s*(分钟|分|小时|钟头|天))\s*(?:之后|以后|后)?"
+)
 _DAY = re.compile(r"(今天|今晚|今早|明天|明早|明晚|后天|大后天)")
 # 这周六 / 下周三 / 周六 / 礼拜天 / 下下周一
 _WEEK = re.compile(r"(下下|下|这|本)?(?:个)?(?:周|星期|礼拜)([一二三四五六日天])")
-_CLOCK = re.compile(r"(凌晨|早上|早晨|上午|中午|下午|傍晚|晚上)?\s*"
-                    r"(\d{1,2}|[一二两三四五六七八九十]+)\s*(?:[:：]\s*(\d{1,2})|点\s*(半|\d{1,2})?)")
+_CLOCK = re.compile(
+    r"(凌晨|早上|早晨|上午|中午|下午|傍晚|晚上)?\s*"
+    r"(\d{1,2}|[一二两三四五六七八九十]+)\s*(?:[:：]\s*(\d{1,2})|点\s*(半|\d{1,2})?)"
+)
 
 _WEEKDAY = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
 
@@ -68,7 +86,7 @@ def parse_when(text: str, now: datetime = None):
                 delta = timedelta(hours=n)
             else:
                 delta = timedelta(days=n)
-        rest = (text[:m.start()] + text[m.end():]).strip()
+        rest = (text[: m.start()] + text[m.end() :]).strip()
         return now + delta, rest
 
     # ---------- 绝对时间 ----------
@@ -76,9 +94,16 @@ def parse_when(text: str, now: datetime = None):
     day_offset = None
     if day_m:
         word = day_m.group(1)
-        day_offset = {"今天": 0, "今晚": 0, "今早": 0,
-                      "明天": 1, "明早": 1, "明晚": 1,
-                      "后天": 2, "大后天": 3}[word]
+        day_offset = {
+            "今天": 0,
+            "今晚": 0,
+            "今早": 0,
+            "明天": 1,
+            "明早": 1,
+            "明晚": 1,
+            "后天": 2,
+            "大后天": 3,
+        }[word]
 
     # 这周六 / 下周三 / 周六
     week_m = _WEEK.search(text)
@@ -115,7 +140,8 @@ def parse_when(text: str, now: datetime = None):
     minute = max(0, min(59, minute))
 
     base = (now + timedelta(days=day_offset or 0)).replace(
-        hour=hour, minute=minute, second=0, microsecond=0)
+        hour=hour, minute=minute, second=0, microsecond=0
+    )
 
     # 没写哪一天、且时间已过 → 顺延到明天
     if day_offset is None and base <= now:

@@ -1,26 +1,25 @@
 __pycache__/
 *.py[cod]
-*.pyo
-
-# ????????/???????
+.venv/
+.env
+.env.*
+!.env.example
 bridge/config.json
-config/config.ready.json
-config/mcp_servers.ready.json
-
-# ???????
+bridge/data/
 bridge/state/
+bridge/logs/
+bridge/_v0/*.json
+config/*.ready.*
 logs/
+data/
 *.log
-
-# ???
+*.sqlite3*
+*.db*
+*.bak
+*.egg-info/
+build/
+dist/
+assets/
 .vscode/
 .idea/
-*.swp
 .DS_Store
-
-# 运行数据
-bridge/_v0/reminders.json
-__pycache__/
-
-# 发布附件（走 GitHub Release，不进仓库）
-assets/

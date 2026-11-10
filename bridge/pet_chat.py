@@ -18,19 +18,15 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _pet_api() -> str:
-    """优先读 bridge/config.json 的 pet_api，其次环境变量，最后默认。"""
-    cfg = os.path.join(_HERE, "config.json")
-    try:
-        with open(cfg, encoding="utf-8") as f:
-            data = json.load(f)
-        if data.get("pet_api"):
-            return str(data["pet_api"]).rstrip("/")
-    except Exception:
-        pass
-    return os.environ.get("PET_API", "http://127.0.0.1:12393").rstrip("/")
+    if os.path.dirname(_HERE) not in sys.path:
+        sys.path.insert(0, os.path.dirname(_HERE))
+    from bridge.settings import PET_API
+
+    return PET_API
 
 
 BASE = _pet_api()
+from bridge.net import urlopen
 
 
 def _post(path: str, payload: dict) -> dict:
@@ -38,12 +34,12 @@ def _post(path: str, payload: dict) -> dict:
     req = urllib.request.Request(
         BASE + path, data=body, headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urlopen(req, timeout=120) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
 def _get(path: str) -> dict:
-    with urllib.request.urlopen(BASE + path, timeout=30) as r:
+    with urlopen(BASE + path, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
 
 

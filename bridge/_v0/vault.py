@@ -1,4 +1,4 @@
-﻿# vault.py — 隐私保险柜：联系人快照、匹配、一次性令牌、审计
+# vault.py — 隐私保险柜：联系人快照、匹配、一次性令牌、审计
 import json
 import os
 import re
@@ -20,7 +20,14 @@ AUDIT_LOG = os.path.join(LOG_DIR, "audit.jsonl")
 _PUNCT = re.compile(r"[^\w\u4e00-\u9fff]+", re.UNICODE)
 
 # "我的设备"伪联系人（QQ 文件传输用），不是真人
-_DEVICE_NAMES = {"我的电脑", "我的手机", "我的pad", "我的平板", "我的设备", "文件传输助手"}
+_DEVICE_NAMES = {
+    "我的电脑",
+    "我的手机",
+    "我的pad",
+    "我的平板",
+    "我的设备",
+    "文件传输助手",
+}
 
 
 def _is_device_account(uid: int, nickname: str, remark: str) -> bool:
@@ -33,13 +40,15 @@ def _is_device_account(uid: int, nickname: str, remark: str) -> bool:
         return True
     return False
 
+
 _PREFIXES = ("小", "老", "阿", "大", "啊")
 _SUFFIXES = ("哥", "姐", "总", "老师", "同学", "老板")
 
 
 def _norm(s: str) -> str:
     """（统一到 name_match）小写、全角转半角、去标点空格。"""
-    import name_match
+    from . import name_match
+
     return name_match.base(s)
 
 
@@ -48,12 +57,11 @@ def _variants(h: str) -> set:
     out = {h}
     for p in _PREFIXES:
         if h.startswith(p) and len(h) > len(p):
-            out.add(h[len(p):])
+            out.add(h[len(p) :])
     for s in _SUFFIXES:
         if h.endswith(s) and len(h) > len(s):
-            out.add(h[:-len(s)])
+            out.add(h[: -len(s)])
     return out
-
 
 
 class Vault:
@@ -80,7 +88,8 @@ class Vault:
             base = c.remark or c.nickname
             c.pinyin = "".join(lazy_pinyin(base)).lower()
             c.pinyin_initials = "".join(
-                lazy_pinyin(base, style=Style.FIRST_LETTER)).lower()
+                lazy_pinyin(base, style=Style.FIRST_LETTER)
+            ).lower()
             self.contacts.append(c)
         return len(self.contacts)
 
@@ -159,13 +168,18 @@ class Vault:
         out = []
         for s, reason, c in scored[:limit]:
             token = uuid.uuid4().hex
-            cand = Candidate(token=token, user_id=c.user_id,
-                             display=c.remark or c.nickname,
-                             score=s, reason=reason)
+            cand = Candidate(
+                token=token,
+                user_id=c.user_id,
+                display=c.remark or c.nickname,
+                score=s,
+                reason=reason,
+            )
             self._tokens[token] = (cand, time.time() + int_cfg("VAULT_TOKEN_TTL", 600))
             out.append(cand)
-        self._audit(op="resolve", hint=hint, count=len(out),
-                    tokens=[c.token for c in out])
+        self._audit(
+            op="resolve", hint=hint, count=len(out), tokens=[c.token for c in out]
+        )
         self._resolve_times.append(time.time())
         return out
 
@@ -181,10 +195,13 @@ class Vault:
             self._tokens.pop(token, None)
             return None
         c = self.find_by_id(cand.user_id)
-        return {"display": cand.display, "user_id": cand.user_id,
-                "reason": cand.reason,
-                "remark": c.remark if c else "",
-                "nickname": c.nickname if c else ""}
+        return {
+            "display": cand.display,
+            "user_id": cand.user_id,
+            "reason": cand.reason,
+            "remark": c.remark if c else "",
+            "nickname": c.nickname if c else "",
+        }
 
     def consume(self, token: str) -> Contact | None:
         """确认后兑换成联系人，令牌一次性使用。"""

@@ -5,10 +5,10 @@ import time
 import uuid
 from collections import deque
 
-import requests
 
 from . import config
 from .config import LOG_DIR
+from ..net import request as http_request
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -20,7 +20,8 @@ _send_times = deque()  # 发送时间戳队列，用于每分钟限流
 
 def _api(action: str, params: dict, timeout: int = 15) -> dict:
     url = f"{config.onebot_url()}/{action}"
-    r = requests.post(
+    r = http_request(
+        "POST",
         url,
         params={"access_token": config.onebot_token()},
         json=params,
@@ -65,7 +66,7 @@ def _load_sent_ids() -> set:
                     continue
                 try:
                     rec = json.loads(line)
-                    if rec.get("status") == "sent":
+                    if rec.get("status") == "sent" and not rec.get("dry_run"):
                         ids.add(rec["action_id"])
                 except json.JSONDecodeError:
                     continue
@@ -93,8 +94,12 @@ def send_private(user_id: int, text: str, action_id: str | None = None) -> dict:
     action_id = action_id or uuid.uuid4().hex
     sent = _load_sent_ids()
     if action_id in sent:
-        return {"status": "ok", "retcode": 0, "data": {"message_id": 0},
-                "note": "already_sent"}
+        return {
+            "status": "ok",
+            "retcode": 0,
+            "data": {"message_id": 0},
+            "note": "already_sent",
+        }
 
     ok, why = _check_rate_limit()
     if not ok:
@@ -106,24 +111,52 @@ def send_private(user_id: int, text: str, action_id: str | None = None) -> dict:
 
     # dry-run：只记录，不真发
     if config.config.get("DRY_RUN") == "1":
-        rec = {"action_id": action_id, "ts": time.time(), "user_id": user_id,
-               "text": text, "status": "sent", "retcode": 0, "dry_run": True}
+        rec = {
+            "action_id": action_id,
+            "ts": time.time(),
+            "user_id": user_id,
+            "text": text,
+            "status": "sent",
+            "retcode": 0,
+            "dry_run": True,
+        }
         _log_action(rec)
-        return {"status": "ok", "retcode": 0,
-                "data": {"message_id": 0}, "dry_run": True}
+        return {
+            "status": "ok",
+            "retcode": 0,
+            "data": {"message_id": 0},
+            "dry_run": True,
+        }
 
     _send_times.append(time.time())
     try:
-        res = _api("send_private_msg", {"user_id": int(user_id), "message": text},
-                   timeout=20)
+        res = _api(
+            "send_private_msg", {"user_id": int(user_id), "message": text}, timeout=20
+        )
     except Exception as e:
-        _log_action({"action_id": action_id, "ts": time.time(), "user_id": user_id,
-                     "text": text, "status": "failed", "retcode": -2,
-                     "error": str(e)})
+        _log_action(
+            {
+                "action_id": action_id,
+                "ts": time.time(),
+                "user_id": user_id,
+                "text": text,
+                "status": "failed",
+                "retcode": -2,
+                "error": str(e),
+            }
+        )
         return {"status": "failed", "retcode": -2, "error": str(e)}
 
     retcode = res.get("retcode", -1)
     status = "sent" if retcode == 0 else "failed"
-    _log_action({"action_id": action_id, "ts": time.time(), "user_id": user_id,
-                 "text": text, "status": status, "retcode": retcode})
+    _log_action(
+        {
+            "action_id": action_id,
+            "ts": time.time(),
+            "user_id": user_id,
+            "text": text,
+            "status": status,
+            "retcode": retcode,
+        }
+    )
     return res

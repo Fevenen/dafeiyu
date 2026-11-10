@@ -1,97 +1,109 @@
-# reminders.py — 待办/提醒的存储（纯 JSON，重启不丢）
+"""Transactional reminder storage. Compatibility API for the companion tools."""
 
-import json
-import os
-import threading
+import time
 import uuid
 from datetime import datetime
-
-_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reminders.json")
-_lock = threading.Lock()
-
-
-def _load() -> list:
-    try:
-        with open(_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+from ..store import db, migrate_reminders
+from ..context import session_id
 
 
-def _save(items: list) -> None:
-    with _lock:
-        try:
-            with open(_FILE, "w", encoding="utf-8") as f:
-                json.dump(items, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-
-def add(text: str, due: datetime) -> dict:
-    item = {
-        "id": uuid.uuid4().hex[:8],
-        "text": (text or "").strip(),
-        "due": due.strftime("%Y-%m-%dT%H:%M:%S"),
-        "created": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-        "fired": False,
-        "fired_at": None,
-        "done": False,
-    }
-    items = _load()
-    items.append(item)
-    _save(items)
+def add(text, due):
+    migrate_reminders()
+    item = dict(
+        id=uuid.uuid4().hex,
+        text=text.strip(),
+        due=due.isoformat(timespec="seconds"),
+        created=datetime.now().isoformat(timespec="seconds"),
+    )
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO reminders(id,session,text,due,created) VALUES(?,?,?,?,?)",
+            (item["id"], session_id(), item["text"], item["due"], item["created"]),
+        )
     return item
 
 
-def pending() -> list:
-    items = [x for x in _load() if not x.get("fired") and not x.get("done")]
-    return sorted(items, key=lambda x: x.get("due") or "")
+def pending():
+    migrate_reminders()
+    with db() as conn:
+        return [
+            dict(x)
+            for x in conn.execute(
+                "SELECT * FROM reminders WHERE session=? AND fired=0 AND done=0 ORDER BY due",
+                (session_id(),),
+            )
+        ]
 
 
-def due_now(now: datetime = None) -> list:
-    now = now or datetime.now()
-    out = []
-    for x in _load():
-        if x.get("fired") or x.get("done"):
-            continue
-        try:
-            due = datetime.fromisoformat(x["due"])
-        except Exception:
-            continue
-        if due <= now:
-            out.append(x)
-    return out
+def due_now(now=None):
+    migrate_reminders()
+    with db() as conn:
+        return [
+            dict(x)
+            for x in conn.execute(
+                "SELECT * FROM reminders WHERE fired=0 AND done=0 AND due<=? AND lease<=? ORDER BY due",
+                ((now or datetime.now()).isoformat(timespec="seconds"), time.time()),
+            )
+        ]
 
 
-def mark_fired(ids) -> None:
-    ids = set(ids)
-    items = _load()
-    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    for x in items:
-        if x.get("id") in ids:
-            x["fired"] = True
-            x["fired_at"] = stamp
-    _save(items)
+def claim(rid):
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        return bool(
+            conn.execute(
+                "UPDATE reminders SET lease=?,attempts=attempts+1 WHERE id=? AND fired=0 AND done=0 AND lease<=?",
+                (time.time() + 120, rid, time.time()),
+            ).rowcount
+        )
 
 
-def remove(rid: str) -> bool:
-    items = _load()
-    left = [x for x in items if x.get("id") != rid]
-    if len(left) == len(items):
-        return False
-    _save(left)
-    return True
+def delivery(rid, channel, status):
+    if channel not in ("qq", "pet") or status not in ("sent", "pending", "unknown"):
+        raise ValueError("invalid delivery state")
+    with db() as conn:
+        conn.execute("UPDATE reminders SET " + channel + "=? WHERE id=?", (status, rid))
 
 
-def recent(limit: int = 20) -> list:
-    items = [x for x in _load() if x.get("fired")]
-    items.sort(key=lambda x: x.get("fired_at") or "", reverse=True)
-    return items[:limit]
+def release(rid):
+    with db() as conn:
+        conn.execute(
+            "UPDATE reminders SET lease=?,fired=CASE WHEN qq='sent' AND pet='sent' THEN 1 ELSE 0 END,fired_at=CASE WHEN qq='sent' AND pet='sent' THEN ? ELSE fired_at END WHERE id=?",
+            (time.time() + 30, datetime.now().isoformat(timespec="seconds"), rid),
+        )
 
 
-def clear_fired() -> int:
-    items = _load()
-    left = [x for x in items if not x.get("fired")]
-    _save(left)
-    return len(items) - len(left)
+def mark_fired(ids):
+    with db() as conn:
+        conn.executemany(
+            "UPDATE reminders SET fired=1,fired_at=? WHERE id=?",
+            [(datetime.now().isoformat(timespec="seconds"), rid) for rid in ids],
+        )
+
+
+def remove(rid):
+    with db() as conn:
+        return bool(
+            conn.execute(
+                "UPDATE reminders SET done=1 WHERE id=? AND session=? AND lease<=?",
+                (rid, session_id(), time.time()),
+            ).rowcount
+        )
+
+
+def recent(limit=20):
+    with db() as conn:
+        return [
+            dict(x)
+            for x in conn.execute(
+                "SELECT * FROM reminders WHERE session=? AND fired=1 ORDER BY fired_at DESC LIMIT ?",
+                (session_id(), int(limit)),
+            )
+        ]
+
+
+def clear_fired():
+    with db() as conn:
+        return conn.execute(
+            "DELETE FROM reminders WHERE session=? AND fired=1", (session_id(),)
+        ).rowcount

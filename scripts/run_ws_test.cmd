@@ -1,4 +1,5 @@
 @echo off
-chcp 65001 >nul
-cd /d "%~dp0.."
-".venv\Scripts\python.exe" "bridge\ws_test.py" %* > "logs\ws_test.log" 2>&1
+setlocal
+if not defined PET_ROOT set "PET_ROOT=%~dp0..\..\pet"
+cd /d "%PET_ROOT%"
+".venv\Scripts\python.exe" -m bridge.ws_test %*

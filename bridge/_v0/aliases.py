@@ -4,10 +4,11 @@
 # 用过的错法记下来，下次直接字符串替换，不用再过一遍模型。
 
 import json
-import os
 import threading
 
-_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aliases.json")
+from ..settings import DATA_DIR
+
+_FILE = str(DATA_DIR / "aliases.json")
 
 _lock = threading.Lock()
 _cache = None

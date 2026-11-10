@@ -13,7 +13,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PET = os.path.dirname(HERE)
-LOGS = os.path.join(PET, "logs")
+sys.path.insert(0, PET)
+from bridge import settings
+
+LOGS = str(settings.LOG_DIR)
 os.makedirs(LOGS, exist_ok=True)
 
 _out = open(os.path.join(LOGS, "watch.out"), "a", encoding="utf-8", buffering=1)
@@ -22,7 +25,9 @@ sys.stdout = _out
 sys.stderr = _err
 
 if __name__ == "__main__":
-    workspace = os.path.join(os.path.dirname(PET), "pet_workspace")
+    workspace = str(
+        settings.path("workspace", os.path.join(os.path.dirname(PET), "pet_workspace"))
+    )
     sys.argv = [
         os.path.join(HERE, "dsh_watch.py"),
         "--dir",

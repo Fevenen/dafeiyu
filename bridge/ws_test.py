@@ -13,7 +13,13 @@ import websockets
 
 async def talk(text: str, wait: float = 120.0, verbose: bool = False) -> str:
     uid = "test-" + uuid.uuid4().hex[:8]
-    url = "ws://127.0.0.1:12393/client-ws?client_uid=" + uid
+    from bridge.settings import PET_API
+
+    url = (
+        PET_API.replace("http://", "ws://").replace("https://", "wss://")
+        + "/client-ws?client_uid="
+        + uid
+    )
     parts = []
     async with websockets.connect(url, max_size=None) as ws:
         try:
