@@ -5,6 +5,14 @@ from contextlib import contextmanager
 from . import settings
 
 
+def is_running(name):
+    try:
+        with singleton(name):
+            return False
+    except RuntimeError:
+        return True
+
+
 @contextmanager
 def singleton(name):
     settings.ensure_dirs()

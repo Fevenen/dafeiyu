@@ -2,7 +2,7 @@
 
 在 DSH 或桌宠窗口里聊天，让桌宠帮你给 QQ 好友发消息、设置提醒，并把回答念出来。
 
-**0.2.0：统一命令路由、事务化执行状态、可移植安装和分段语音预合成。** 本次没有新增视觉功能。
+**0.2.1：修复监听器启动与语音导入问题，普通聊天恢复轻量路径。** 包含 0.2.0 的统一路由、事务状态、可移植安装和语音预合成；没有新增视觉功能。
 
 ## 使用示例
 
@@ -30,7 +30,7 @@ DSH / 桌宠输入
 DSH 会话文件 → 只读 watcher → 语音队列 → TTS 预合成 → 顺序播放
 ```
 
-- 聊天不会执行所有工具。网关保留 DSH 原生工具，只筛选桌宠相关工具定义。
+- 普通闲聊不携带工具定义，不额外分类。明确工作请求、工具结果后续轮次会保留 DSH 原生工具，并筛选桌宠相关工具。
 - MCP、桌宠规则入口和网关使用同一个发送确认服务。
 - 待发消息按会话保存；数据库事务保证同一任务只能被一个确认者领取。
 - 同一请求 ID 的命令重试返回已有结果；不同轮次应使用不同 ID。
@@ -91,6 +91,7 @@ cd "D:\我的助手\pet"
 | `onebot.token` / `ONEBOT_TOKEN` | QQ token，只保存在本机 |
 | `kvmem_upstream` / `KVMEM_UPSTREAM` | 本地模型上游地址 |
 | `kvmem_proxy_port` / `KVMEM_PROXY_PORT` | 网关监听端口 |
+| `native_tools_policy` / `NATIVE_TOOLS_POLICY` | 默认 auto 按需提供工具；all 始终保留原生工具 |
 | `workspace` / `WORKSPACE` | watcher 默认工作区 |
 | `desktop_client` | 可选 Electron 可执行文件 |
 | `snowluma_launcher` | 可选 SnowLuma 启动脚本 |

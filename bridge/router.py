@@ -6,7 +6,7 @@ Callers supply session/request IDs. Model classification can never confirm a sen
 import re
 from . import safety, store, tools
 from .context import request_id
-from .capabilities import candidates
+from .capabilities import candidates, action_request
 
 SEND = re.compile(
     r"^(?:请)?(?:帮我|替我)?(?:给|跟|和)\s*(.+?)\s*(?:发(?:个)?消息|发信息|说|讲)\s*[，,:：]?\s*(?:说|讲)?\s*(.+)$"
@@ -35,11 +35,15 @@ def parse(text):
         return "cancel_reminder", dict(keyword=keyword.strip(" ，,：:"))
     m = SEND.match(q)
     if m:
+        if m[1].strip() in ("我", "你", "自己"):
+            return None
         return "send_qq_message", dict(to=m[1].strip(), text=m[2].strip())
     # A name lookup happens only for an explicit recipient-style command.
     m = VERB.match(q)
     if m:
         rest = q[m.end() :]
+        if rest.startswith(("我", "你", "什么", "啥")):
+            return None
         for row in sorted(safety.list_contacts(), key=lambda x: -len(x["name"])):
             key = row["name"].strip(" ，,。：:")
             if key and rest.lower().startswith(key.lower()):
@@ -83,7 +87,13 @@ def route(text, classifier=None):
         return None
     command = parse(q)
     relevant = candidates(q)
-    if command is None and classifier is not None and relevant and len(q) <= 500:
+    if (
+        command is None
+        and classifier is not None
+        and relevant
+        and action_request(q)
+        and len(q) <= 500
+    ):
         proposed = classifier(q, relevant)
         if proposed:
             action, args = proposed

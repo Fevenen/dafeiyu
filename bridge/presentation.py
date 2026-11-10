@@ -6,6 +6,7 @@ Acceptance means queued, not necessarily played. Status exposes the distinction.
 import asyncio
 import copy
 import json
+import importlib
 from collections import OrderedDict
 from .speech import to_speech
 
@@ -101,8 +102,15 @@ class CachedEngine:
 
 
 async def enqueue(handler, text, key):
-    from open_llm_vtuber.conversations.single_conversation import _speak_forced
-    from open_llm_vtuber.conversations.tts_manager import TTSTaskManager
+    # run_server.py imports src.open_llm_vtuber; installed packages may omit src.
+    # Resolve from the actual handler so there is only one backend module instance.
+    package = type(handler).__module__.rsplit(".", 1)[0]
+    _speak_forced = importlib.import_module(
+        package + ".conversations.single_conversation"
+    )._speak_forced
+    TTSTaskManager = importlib.import_module(
+        package + ".conversations.tts_manager"
+    ).TTSTaskManager
 
     if not hasattr(handler, "_speech_queues"):
         handler._speech_queues = {}

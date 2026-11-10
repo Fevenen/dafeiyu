@@ -15,7 +15,7 @@ if __package__ in (None, ""):
 from bridge import settings
 from bridge.context import scope
 from bridge.router import route
-from bridge.capabilities import select_tools
+from bridge.capabilities import model_tools
 from bridge.net import request as http_request
 from bridge import store
 
@@ -176,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(response.json(), response.status_code)
             except (requests.RequestException, ValueError):
                 return self._send_json({"error": "upstream unavailable"}, 502)
-        self._send_json({"ok": True, "service": "pet-gateway", "version": "0.2.0"})
+        self._send_json({"ok": True, "service": "pet-gateway", "version": "0.2.1"})
 
     def _reply(self, want_stream, model, content, usage=None):
         """直接返回一句"助手回复"（不经过模型）。"""
@@ -240,10 +240,25 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def _forward(self, body, want_stream):
+        started = time.perf_counter()
         body = dict(body)
         messages = body.get("messages") or []
         body["messages"] = trim_messages(messages)
-        selected = select_tools(body.get("tools"), last_user_text(messages))
+        selected = model_tools(
+            body.get("tools"),
+            last_user_text(messages),
+            continuation=bool(messages and messages[-1].get("role") == "tool"),
+            policy=str(settings.get("native_tools_policy", "auto")),
+        )
+        log(
+            "chat payload: messages=%d tools=%d->%d chars=%d"
+            % (
+                len(body["messages"]),
+                len(body.get("tools") or []),
+                len(selected),
+                sum(len(json.dumps(m, ensure_ascii=False)) for m in body["messages"]),
+            )
+        )
         if selected:
             body["tools"] = selected
         else:
@@ -284,7 +299,14 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             try:
                 # Preserve empty lines: SSE events may contain multiple data lines.
+                first = True
                 for line in upstream.iter_lines(chunk_size=1):
+                    if first and line.startswith(b"data:"):
+                        log(
+                            "upstream first event: %.3fs"
+                            % (time.perf_counter() - started)
+                        )
+                        first = False
                     self.wfile.write(line + b"\n")
                     self.wfile.flush()
             except (requests.RequestException, BrokenPipeError, ConnectionResetError):

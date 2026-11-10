@@ -94,6 +94,9 @@ def main():
     )
     parser.add_argument("--sessions")
     parser.add_argument("--api")
+    parser.add_argument(
+        "--once", action="store_true", help="process one snapshot (diagnostics)"
+    )
     args = parser.parse_args()
     sessions = settings.path("dsh_sessions", settings.SESSIONS_DIR, args.sessions)
     api = str(settings.get("pet_api", settings.PET_API, args.api)).rstrip("/")
@@ -167,18 +170,11 @@ def main():
                 state[key] = cursor + chunk
                 if not args.dry:
                     save(state_path, state)
+            elif not args.once:
+                time.sleep(2)
+        if args.once:
+            return
         time.sleep(0.3)
-
-
-if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        from bridge.singleton import singleton
-
-        with singleton("watcher"):
-            main()
-    except KeyboardInterrupt:
-        pass
 
 
 def clean(text):
@@ -196,3 +192,14 @@ def clean(text):
     t = re.sub(r"[ \t]+", " ", t)
     t = re.sub(r"\n{2,}", "\n", t)
     return t.strip()
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        from bridge.singleton import singleton
+
+        with singleton("watcher"):
+            main()
+    except KeyboardInterrupt:
+        pass

@@ -44,7 +44,10 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
             received_data_buffers={},
             broadcast_to_group=None,
         )
-        scope = {"__package__": "open_llm_vtuber", "__name__": "open_llm_vtuber.websocket_handler"}
+        scope = {
+            "__package__": "open_llm_vtuber",
+            "__name__": "open_llm_vtuber.websocket_handler",
+        }
         exec(
             compile(ast.Module(body=[node], type_ignores=[]), str(source), "exec"),
             scope,

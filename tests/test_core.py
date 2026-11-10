@@ -131,7 +131,7 @@ class CoreTests(unittest.TestCase):
     def test_confirmation_cannot_be_classified(self):
         store.prepare(1, "Mock", "hello")
         with patch("bridge.message_service.sender") as sender:
-            result = route("这个消息可以吗", classifier=lambda *a: ("confirm_send", {}))
+            result = route("请发这个消息", classifier=lambda *a: ("confirm_send", {}))
             self.assertIn("明确回复", result)
             sender.assert_not_called()
 
