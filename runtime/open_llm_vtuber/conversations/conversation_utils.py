@@ -24,10 +24,13 @@ def create_batch_input(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> BatchInput:
     """Create batch input for agent processing"""
+    from bridge.vision import observation_note
+    note = observation_note(images)
+    texts = [TextData(source=TextSource.INPUT, content=input_text, from_name=from_name)]
+    if note:
+        texts.append(TextData(source=TextSource.INPUT, content=note))
     return BatchInput(
-        texts=[
-            TextData(source=TextSource.INPUT, content=input_text, from_name=from_name)
-        ],
+        texts=texts,
         images=[
             ImageData(
                 source=ImageSource(img["source"]),
@@ -166,20 +169,27 @@ async def finalize_conversation_turn(
     broadcast_ctx: Optional[BroadcastContext] = None,
 ) -> None:
     """Finalize a conversation turn"""
+    from uuid import uuid4
     if tts_manager.task_list:
         await asyncio.gather(*tts_manager.task_list)
         await tts_manager._payload_queue.join()
         # Install the waiter before notifying the frontend to avoid losing a fast ack.
+        playback_id = uuid4().hex
         playback_waiter = asyncio.create_task(message_handler.wait_for_response(
-            client_uid, "frontend-playback-complete", timeout=180
+            client_uid, "frontend-playback-complete", request_id=playback_id, timeout=180
         ))
         await asyncio.sleep(0)
-        await websocket_send(json.dumps({"type": "backend-synth-complete"}))
-        response = await playback_waiter
+        try:
+            await websocket_send(json.dumps({"type": "backend-synth-complete", "request_id": playback_id}))
+            response = await playback_waiter
+        finally:
+            if not playback_waiter.done():
+                playback_waiter.cancel()
+                await asyncio.gather(playback_waiter, return_exceptions=True)
 
         if not response:
             logger.warning(f"No playback completion response from {client_uid}")
-            return
+            raise TimeoutError('Frontend playback completion was not received')
 
     await websocket_send(json.dumps({"type": "force-new-message"}))
 

@@ -3,6 +3,16 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  vision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test frontend/scripts/test-screen-vision.mjs
+      - run: node --test frontend/scripts/test-playback.mjs
+      - run: node --test sillytavern-extension/tests/controller.test.js
   tests:
     strategy:
       matrix:

@@ -38,6 +38,16 @@ class StartupTests(unittest.TestCase):
                 encoding="utf-8",
             )
             data = root / "data"
+            import zstandard
+            history = root / "history"
+            journal = history / "workspace/session-fixture/session.v4.jsonl.zstd"
+            journal.parent.mkdir(parents=True)
+            events = [
+                {"type": "turn/start", "data": {"turn": 1}},
+                {"type": "assistant/message", "data": {"turn": 1, "message": {"content": [{"type": "text", "text": "**恢复测试。**"}]}}},
+                {"type": "turn/end", "data": {"turn": 1, "reason": {"kind": "completed"}}},
+            ]
+            journal.write_bytes(zstandard.ZstdCompressor().compress(("\n".join(json.dumps(x) for x in events) + "\n").encode()))
             env = dict(
                 os.environ,
                 PET_CONFIG=str(root / "missing.json"),
@@ -51,6 +61,8 @@ class StartupTests(unittest.TestCase):
                     "bridge.dsh_watch",
                     "--sessions",
                     str(sessions),
+                    "--history",
+                    str(history),
                     "--session",
                     "fixture",
                     "--dry",
@@ -65,7 +77,7 @@ class StartupTests(unittest.TestCase):
             self.assertIn("[dry]", result.stdout.decode("utf-8"))
             self.assertFalse((data / "state/dsh_watch.json").exists())
 
-    def test_keyword_questions_do_not_classify_or_lookup_contacts(self):
+    def test_keyword_questions_classify_without_lookup_contacts(self):
         from bridge.router import route
 
         for question in (
@@ -78,9 +90,9 @@ class StartupTests(unittest.TestCase):
                 patch("bridge.router.safety.list_contacts") as contacts,
                 patch("bridge.router.tools.send_qq_message") as send,
             ):
-                classifier = unittest.mock.Mock()
+                classifier = unittest.mock.Mock(return_value=('chat', {}))
                 self.assertIsNone(route(question, classifier))
-                classifier.assert_not_called()
+                classifier.assert_called_once()
                 contacts.assert_not_called()
                 send.assert_not_called()
 
@@ -93,8 +105,8 @@ class StartupTests(unittest.TestCase):
         ]
         self.assertEqual(model_tools(tools, "今天好累"), [])
         self.assertEqual(model_tools(tools, "你叫什么名字"), [])
-        self.assertEqual(model_tools(tools, "查看项目代码"), tools)
-        self.assertEqual(model_tools(tools, "刚才的结果", continuation=True), tools)
+        self.assertEqual(model_tools(tools, "查看项目代码"), tools[:1])
+        self.assertEqual(model_tools(tools, "刚才的结果", continuation=True), tools[:1])
         self.assertEqual(model_tools(tools, "你好", policy="all"), tools)
 
     def test_launcher_does_not_restart_running_components(self):

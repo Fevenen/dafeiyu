@@ -7,8 +7,15 @@ import asyncio
 import copy
 import json
 import importlib
+from contextvars import ContextVar
 from collections import OrderedDict
 from .speech import to_speech
+
+_current_valid = ContextVar('speech_valid', default=None)
+
+
+class ObsoleteSpeech(Exception):
+    pass
 
 
 class SpeechQueue:
@@ -19,7 +26,7 @@ class SpeechQueue:
         self.worker = None
         self.synth_lock = asyncio.Lock()
 
-    async def enqueue(self, key, text):
+    async def enqueue(self, key, text, valid=None):
         if key in self.jobs:
             if self.jobs[key]["text"] != text:
                 raise ValueError("job_id already belongs to different text")
@@ -43,6 +50,7 @@ class SpeechQueue:
             "text": text,
             "status": "queued",
             "audio": asyncio.create_task(generate()),
+            "valid": valid,
         }
         self.jobs[key] = job
         self.queue.put_nowait(job)
@@ -54,17 +62,23 @@ class SpeechQueue:
         while not self.queue.empty():
             job = await self.queue.get()
             path = None
+            token = _current_valid.set(job['valid'])
             try:
                 path = await job["audio"]
+                if job['valid'] and not job['valid']():
+                    raise ObsoleteSpeech()
                 job["status"] = "playing"
                 await self.play(job["text"], path)
                 job["status"] = "played"
+            except ObsoleteSpeech:
+                job['status'] = 'cancelled'
             except asyncio.CancelledError:
                 job["status"] = "cancelled"
                 return
             except Exception:
                 job["status"] = "failed"
             finally:
+                _current_valid.reset(token)
                 if path:
                     self.remove(path)
                 self.queue.task_done()
@@ -101,7 +115,7 @@ class CachedEngine:
         pass  # The queue owns the prefetched file.
 
 
-async def enqueue(handler, text, key):
+async def enqueue(handler, text, key, valid=None):
     # run_server.py imports src.open_llm_vtuber; installed packages may omit src.
     # Resolve from the actual handler so there is only one backend module instance.
     package = type(handler).__module__.rsplit(".", 1)[0]
@@ -134,6 +148,9 @@ async def enqueue(handler, text, key):
                 if task and not task.done():
                     # Preserve real conversations; wait instead of cancelling after 2s.
                     await task
+                guard = _current_valid.get()
+                if guard and not guard():
+                    raise ObsoleteSpeech()
                 clone = copy.copy(_ctx)
                 clone.tts_engine = CachedEngine(path)
                 manager = TTSTaskManager()
@@ -148,7 +165,7 @@ async def enqueue(handler, text, key):
             handler._speech_queues[uid] = SpeechQueue(
                 synth, play, ctx.tts_engine.remove_file
             )
-        await handler._speech_queues[uid].enqueue(key, text)
+        await handler._speech_queues[uid].enqueue(key, text, valid=valid)
         accepted += 1
     return accepted
 

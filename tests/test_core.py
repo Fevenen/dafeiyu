@@ -142,12 +142,12 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(route("10分钟后提醒我喝水"), "created")
             self.assertEqual(call.call_count, 1)
 
-    def test_chat_does_not_run_tools_or_classifier(self):
+    def test_unmatched_chat_is_classified_without_running_tools(self):
         with patch("bridge.tools.send_qq_message") as send:
-            classify = Mock()
+            classify = Mock(return_value=('chat', {}))
             self.assertIsNone(route("今天好累", classify))
             send.assert_not_called()
-            classify.assert_not_called()
+            classify.assert_called_once()
 
     def test_native_tools_preserved(self):
         def tool(name):

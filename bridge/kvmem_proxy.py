@@ -18,6 +18,10 @@ from bridge.router import route
 from bridge.capabilities import model_tools
 from bridge.net import request as http_request
 from bridge import store
+from bridge.screen_context import attach_screen, screen_skip_reason
+from bridge.reply_policy import apply_reply_policy
+from bridge.intent import classify as classify_intent
+from bridge.game_context import attach_game
 
 UPSTREAM = str(settings.get("kvmem_upstream", "http://127.0.0.1:18200")).rstrip("/")
 PORT = int(settings.get("kvmem_proxy_port", 18080))
@@ -80,71 +84,8 @@ def trim_messages(messages, keep=None):
     return system + rest[start:]
 
 
-def classify(text, capabilities):
-    allowed = sorted(
-        {t for c in capabilities for t in c.tools} - {"confirm_send", "cancel_send"}
-    )
-    schema = {
-        "name": "parse_command",
-        "description": "仅解析明确命令；聊天、疑问、举例、否定指令选 chat。不得自行补充收件人、内容或时间。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "enum": allowed + ["chat"]},
-                "args": {
-                    "type": "object",
-                    "properties": {
-                        k: {"type": "string"}
-                        for k in (
-                            "to",
-                            "text",
-                            "time_text",
-                            "content",
-                            "query",
-                            "keyword",
-                        )
-                    },
-                    "additionalProperties": False,
-                },
-            },
-            "required": ["action", "args"],
-            "additionalProperties": False,
-        },
-    }
-    body = {
-        "model": settings.get("kvmem_model", "kvmem-polystrata-qwen35"),
-        "stream": False,
-        "max_tokens": 200,
-        "tools": [{"type": "function", "function": schema}],
-        "tool_choice": {"type": "function", "function": {"name": "parse_command"}},
-        "messages": [
-            {
-                "role": "system",
-                "content": "把用户明确提出的任务解析为工具参数。用户在讨论功能、引用示例或询问原理时返回 chat。",
-            },
-            {"role": "user", "content": text},
-        ],
-    }
-    try:
-        response = http_request(
-            "POST",
-            UPSTREAM + "/v1/chat/completions",
-            json=body,
-            headers={"Authorization": "Bearer local"},
-            timeout=30,
-        )
-        response.raise_for_status()
-        calls = response.json()["choices"][0]["message"].get("tool_calls") or []
-        if len(calls) != 1 or calls[0]["function"]["name"] != "parse_command":
-            return None
-        args = json.loads(calls[0]["function"]["arguments"])
-        if args.get("action") not in allowed:
-            return None
-        return args["action"], args.get("args", {})
-    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
-        log("Intent classifier unavailable; no action executed.")
-        return None
-
+def classify(text, capabilities, recent_messages=None):
+    return classify_intent(text, capabilities, recent_messages=recent_messages, upstream=UPSTREAM)
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -176,7 +117,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(response.json(), response.status_code)
             except (requests.RequestException, ValueError):
                 return self._send_json({"error": "upstream unavailable"}, 502)
-        self._send_json({"ok": True, "service": "pet-gateway", "version": "0.2.1"})
+        self._send_json({"ok": True, "service": "pet-gateway", "version": "0.2.1", "screen_context": True, "screen_intent_model": True,
+                         "short_reply_policy": True, "contact_choices": True, "command_prefixes": True,
+                         "unmatched_intent": "all", "intent_catalogue": "compact"})
 
     def _reply(self, want_stream, model, content, usage=None):
         """直接返回一句"助手回复"（不经过模型）。"""
@@ -239,11 +182,16 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
-    def _forward(self, body, want_stream):
+    def _forward(self, body, want_stream, screen_decision=None):
         started = time.perf_counter()
         body = dict(body)
         messages = body.get("messages") or []
         body["messages"] = trim_messages(messages)
+        body = attach_game(body)
+        body, screen_status = attach_screen(body, decision=screen_decision)
+        body = apply_reply_policy(body)
+        if screen_status not in ('skipped', 'background_task', 'provided_image'):
+            log('screen context: ' + screen_status)
         selected = model_tools(
             body.get("tools"),
             last_user_text(messages),
@@ -324,8 +272,10 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(messages, list):
                 raise ValueError("messages must be a list")
             want_stream = bool(body.get("stream"))
+            screen_decisions = []
             # A follow-up with tool results must not re-execute the previous user turn.
-            if messages and messages[-1].get("role") == "user":
+            if (messages and messages[-1].get("role") == "user"
+                    and screen_skip_reason(body) != 'background_task'):
                 text = last_user_text(messages)
                 session, rid = identity(body, self.headers)
                 metadata = body.get("metadata") or {}
@@ -346,10 +296,15 @@ class Handler(BaseHTTPRequestHandler):
                         "检测到无法区分的会话分支，未执行动作。请为会话配置不同的 X-Session-ID 或使用独立网关配置。",
                     )
                 with scope(session, rid, text):
-                    result = route(text, classifier=classify)
+                    result = route(text, classifier=lambda value, relevant:
+                                   classify(value, relevant, recent_messages=messages),
+                                   decision_sink=screen_decisions.append,
+                                   allow_screen=screen_skip_reason(body) is None,
+                                   recent_messages=messages)
                 if result is not None:
                     return self._reply(want_stream, body.get("model"), result)
-            return self._forward(body, want_stream)
+            return self._forward(body, want_stream,
+                                 screen_decisions[-1] if screen_decisions else None)
         except (ValueError, TypeError, KeyError):
             return self._send_json({"error": "invalid request"}, 400)
         except Exception:

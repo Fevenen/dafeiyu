@@ -1,0 +1,17 @@
+#dafeiyu-tavern-toolbar { display:flex; align-items:center; gap:.5rem; padding:.3rem .6rem; font-size:.85rem; }
+#dafeiyu-tavern-toolbar button, #dafeiyu-tavern-panel button { border:1px solid #67a1bc; border-radius:6px; padding:.35rem .6rem; color:inherit; background:rgba(70,123,151,.2); cursor:pointer; }
+#dafeiyu-tavern-toolbar button:focus-visible, #dafeiyu-tavern-panel button:focus-visible { outline:2px solid #8cdaff; }
+#dafeiyu-tavern-panel { position:fixed; z-index:2600; right:12px; bottom:90px; width:min(410px,calc(100vw - 24px)); max-height:75vh; overflow-y:auto; box-sizing:border-box; padding:14px; color:#ecf6fc; background:#192c39; border:1px solid #6d9fb7; border-radius:12px; box-shadow:0 8px 28px #0008; font-size:14px; line-height:1.5; }
+#dafeiyu-tavern-panel[hidden] { display:none; }
+#dafeiyu-tavern-panel header, #dafeiyu-tavern-panel .pet-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0; }
+#dafeiyu-tavern-panel header { justify-content:space-between; }
+#dafeiyu-tavern-panel label { display:block; }
+#dafeiyu-tavern-panel input[type=url], #dafeiyu-tavern-panel textarea { display:block; box-sizing:border-box; width:100%; margin:4px 0 8px; border:1px solid #628498; border-radius:5px; padding:6px; color:#fff; background:#0e1e28; font:inherit; }
+#dafeiyu-tavern-panel input[type=checkbox] { margin-right:4px; }
+#dafeiyu-tavern-panel .pet-row label:has(input[type=checkbox]) { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+#dafeiyu-tavern-panel .pet-row label:has(input[type=checkbox]) input { margin:0; }
+#dafeiyu-tavern-panel select { background:#0e1e28; color:#fff; }
+#dafeiyu-tavern-panel .pet-notice { font-size:12px; color:#c0d4df; }
+#dafeiyu-tavern-panel .pet-comments { white-space:pre-wrap; max-height:180px; overflow:auto; border-left:3px solid #7fc8ec; padding-left:8px; margin:8px 0; }
+#dafeiyu-tavern-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+#dafeiyu-tavern-panel button:disabled { opacity:.45; cursor:default; }

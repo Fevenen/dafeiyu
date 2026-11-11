@@ -49,4 +49,7 @@ def confirm():
 
 
 def cancel():
-    return "好，不发了。" if store.cancel() else "没有待确认的消息。"
+    dialogue = store.get_dialogue()
+    store.clear_dialogue()
+    cancelled = store.cancel()
+    return "好，不发了。" if cancelled or dialogue else "没有待确认的消息。"

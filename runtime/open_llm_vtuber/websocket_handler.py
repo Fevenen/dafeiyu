@@ -5,6 +5,7 @@ import json
 from enum import Enum
 import numpy as np
 from loguru import logger
+from bridge.screen_observer import ScreenObserver
 
 from .service_context import ServiceContext
 from .chat_group import (
@@ -69,6 +70,7 @@ class WebSocketHandler:
         self.current_conversation_tasks: Dict[str, Optional[asyncio.Task]] = {}
         self.default_context_cache = default_context_cache
         self.received_data_buffers: Dict[str, np.ndarray] = {}
+        self.screen_observer = ScreenObserver(self.client_connections)
 
         # Message handlers mapping
         self._message_handlers = self._init_message_handlers()
@@ -95,7 +97,15 @@ class WebSocketHandler:
             "audio-play-start": self._handle_audio_play_start,
             "request-init-config": self._handle_init_config_request,
             "heartbeat": self._handle_heartbeat,
+            "screen-vision-state": self._handle_screen_state,
+            "screen-capture-result": self._handle_screen_frame,
         }
+
+    async def _handle_screen_state(self, websocket, client_uid, data):
+        self.screen_observer.update(client_uid, data)
+
+    async def _handle_screen_frame(self, websocket, client_uid, data):
+        self.screen_observer.receive(client_uid, data)
 
     async def handle_new_connection(
         self, websocket: WebSocket, client_uid: str
@@ -354,6 +364,7 @@ class WebSocketHandler:
 
     async def handle_disconnect(self, client_uid: str) -> None:
         """Handle client disconnection"""
+        self.screen_observer.remove(client_uid)
         queue = getattr(self, "_speech_queues", {}).pop(client_uid, None)
         if queue:
             await queue.close()
@@ -395,6 +406,7 @@ class WebSocketHandler:
 
     async def _cleanup_failed_connection(self, client_uid: str) -> None:
         """Clean up failed connection data"""
+        self.screen_observer.remove(client_uid)
         self.client_connections.pop(client_uid, None)
         self.client_contexts.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)

@@ -1,12 +1,8 @@
-"""speech.py — 把文字转成"TTS 念得出来"的版本。
+"""Prepare text for TTS without changing the displayed reply.
 
-中文 VITS 模型不认英文字母和阿拉伯数字：
-  · "feven"    → 0 个采样（念不出来）
-  · "2997415072" → 被当成"二十九亿..."（不是逐位）
-所以念之前先转写：
-  · 字母 → 中文读法（Z → 贼，feven → 艾弗伊维伊恩）
-  · 数字 → 逐位中文（2997415072 → 二九九七四一五零七二）
-显示的文字不变，只影响念出来的版本。
+Unsupported letters are rendered as pronounceable Chinese syllables. Long digit
+sequences are read one digit at a time, for example 1234567890. This module only
+transforms speech text; it does not change contacts, messages or visible text.
 """
 
 import re

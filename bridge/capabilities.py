@@ -10,6 +10,15 @@ class Capability:
     description: str
     pattern: str
     tools: tuple
+    intent_actions: tuple = ()
+
+
+SCREEN_PATTERN = (
+    r'屏幕|画面|截图|窗口'
+    r'|^(?:那|所以|请|帮我|你再|再)?\s*(?:这(?:个|道|题|张|里|一问)?|那个|那里|它|第二问|下一问|上一问|上面|下面|左边|右边)'
+    r'.{0,50}(?:怎么|什么|啥|意思|选|做|看|不懂|呢|对不对|为什么)'
+    r'|^(?:我)?(?:该|应该)?选哪个[？?。！!]*$'
+)
 
 
 REGISTRY = (
@@ -25,6 +34,8 @@ REGISTRY = (
         r"提醒|待办|叫我|喊我",
         ("set_reminder", "list_reminders", "cancel_reminder"),
     ),
+    Capability('screen', '读取用户已授权的当前屏幕，理解题目、报错、界面或含糊的画面指代',
+               SCREEN_PATTERN, (), ('observe_screen',)),
 )
 BRIDGE_TOOLS = frozenset(t for c in REGISTRY for t in c.tools) | {
     "recent_actions",
@@ -37,19 +48,20 @@ def candidates(text):
     return [c for c in REGISTRY if re.search(c.pattern, text or "")]
 
 
-def action_request(text):
-    """Only ambiguous commands need a classifier; mentioning a tool is not a command."""
-    if re.search(
-        r"^(?:请)?(?:告诉我|跟我说|给我讲|你叫|叫什么|叫啥|为什么|怎么|什么是|解释)",
-        (text or "").strip(),
-    ):
-        return False
-    return bool(
-        re.search(
-            r"^(?:请|你)?(?:帮我|替我|麻烦你|帮忙)?\s*(?:给|跟|和|发|发送|喊|叫|让|通知|告诉|转告|设置|设个|设一|提醒|取消|删除|查看|查询|列出)|(?:后|点|分钟|小时).*提醒我",
-            (text or "").strip(),
-        )
-    )
+def command_text(text):
+    q = (text or "").strip()
+    # Strip conversational lead-ins before both rule parsing and classifier gating.
+    # Never strip a standalone confirmation or search inside arbitrary prose.
+    for _ in range(3):
+        previous = q
+        q = re.sub(r"^(?:ok(?:ay)?|嗯嗯?|好[的啦呀]?|行|不用啦|不用了|那就|那)[，,、：:\s]+(?=\S)", "", q, flags=re.I)
+        q = re.sub(r"^(?:你)?(?:(?:能不能|可以|能)\s*)?(?:请)?(?:帮我|替我|麻烦你|请你|帮忙)\s*", "", q)
+        q = re.sub(r"^(?:你)?(?:请)?\s*", "", q)
+        q = re.sub(r"^(?:在|上|通过)?QQ(?:上|里)?\s*", "", q, flags=re.I)
+        if q == previous:
+            break
+    return q
+
 
 
 def native_task(text):
@@ -65,20 +77,15 @@ def native_task(text):
 
 def model_tools(definitions, text, continuation=False, policy="auto"):
     selected = select_tools(definitions, text)
-    if continuation or policy == "all" or native_task(text):
+    if policy == "all":
         return selected
-    # Recognized commands have already executed in the router; generic chat is light.
-    if not action_request(text):
-        return []
-    return [
-        item
-        for item in selected
-        if any(
-            (item.get("function") or {}).get("name", "") == name
-            or (item.get("function") or {}).get("name", "").endswith("_" + name)
-            for name in BRIDGE_TOOLS
-        )
-    ]
+    # Companion actions are owned by the semantic dispatcher, never re-issued by chat.
+    if continuation or native_task(text):
+        return [item for item in selected if not any(
+            (item.get('function') or {}).get('name', '') == name
+            or (item.get('function') or {}).get('name', '').endswith('_' + name)
+            for name in BRIDGE_TOOLS)]
+    return []
 
 
 def select_tools(definitions, text):
@@ -106,6 +113,7 @@ def select_tools(definitions, text):
 
 def describe():
     return [
-        {"name": c.name, "description": c.description, "tools": list(c.tools)}
+        {"name": c.name, "description": c.description, "tools": list(c.tools),
+         **({'intent_actions': list(c.intent_actions)} if c.intent_actions else {})}
         for c in REGISTRY
     ]

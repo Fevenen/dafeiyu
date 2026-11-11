@@ -32,6 +32,8 @@ def db():
         CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS conversation_heads (
           session TEXT PRIMARY KEY, digest TEXT, length INTEGER, conflict INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS dialogue (
+          session TEXT PRIMARY KEY, payload TEXT NOT NULL, updated REAL NOT NULL);
         """)
         yield conn
         conn.commit()
@@ -64,6 +66,24 @@ def prepare(uid, name, text, ttl=300):
         return dict(
             conn.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone()
         )
+
+
+def set_dialogue(payload):
+    with db() as conn:
+        conn.execute("INSERT OR REPLACE INTO dialogue VALUES(?,?,?)",
+                     (session_id(), json.dumps(payload, ensure_ascii=False), time.time()))
+
+
+def get_dialogue(ttl=300):
+    with db() as conn:
+        row = conn.execute("SELECT payload FROM dialogue WHERE session=? AND updated>?",
+                           (session_id(), time.time() - ttl)).fetchone()
+        return json.loads(row["payload"]) if row else {}
+
+
+def clear_dialogue():
+    with db() as conn:
+        conn.execute("DELETE FROM dialogue WHERE session=?", (session_id(),))
 
 
 def pending(ttl=300):
@@ -115,6 +135,17 @@ def latest():
             (session_id(),),
         ).fetchone()
         return dict(row) if row else {}
+
+
+def cached_request(rid):
+    if not rid:
+        return None
+    with db() as conn:
+        row = conn.execute("SELECT status,result FROM requests WHERE session=? AND id=?",
+                           (session_id(), rid)).fetchone()
+        if row:
+            return row['result'] if row['status'] == 'done' else '这条请求正在处理或上次处理未完成，请先查询状态，不要重复执行。'
+    return None
 
 
 def request_once(rid, fn):

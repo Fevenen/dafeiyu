@@ -1,6 +1,14 @@
 __pycache__/
 *.py[cod]
 .venv/
+node_modules/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+*.tsbuildinfo
+test-results/
+playwright-report/
 .env
 .env.*
 !.env.example

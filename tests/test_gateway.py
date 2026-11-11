@@ -56,6 +56,69 @@ class Upstream(BaseHTTPRequestHandler):
 
 
 class GatewayTests(unittest.TestCase):
+    def test_unmatched_chat_classifies_once_then_forwards_without_bridge_tools(self):
+        definitions = [{'type': 'function', 'function': {'name': 'send_qq_message'}}]
+        with patch('bridge.kvmem_proxy.classify', return_value=('chat', {})) as model:
+            response = requests.post(self.url, json={'metadata': {'session_id': self.id()},
+                'messages': [{'role': 'user', 'content': '今天好累'}], 'tools': definitions}, timeout=3)
+        self.assertEqual(response.status_code, 200)
+        model.assert_called_once()
+        self.assertNotIn('tools', Upstream.seen[-1])
+
+    def test_unfamiliar_command_reaches_classifier_without_keyword_gate(self):
+        before = len(Upstream.seen)
+        with patch('bridge.kvmem_proxy.classify', return_value=('send_qq_message', {'to': '小z', 'text': '起床'})) as model, \
+             patch('bridge.tools.send_qq_message', return_value='准备发给小z：起床，确认吗？') as send:
+            response = requests.post(self.url, json={'metadata': {'session_id': self.id()},
+                'messages': [{'role': 'user', 'content': '拜托把起床这两个字捎给小z吧'}]}, timeout=3)
+        self.assertIn('确认', response.json()['choices'][0]['message']['content'])
+        model.assert_called_once()
+        send.assert_called_once_with(to='小z', text='起床')
+        self.assertEqual(len(Upstream.seen), before)
+
+    def test_failed_intent_does_not_fall_back_to_free_chat(self):
+        before = len(Upstream.seen)
+        with patch('bridge.kvmem_proxy.classify', return_value=None):
+            response = requests.post(self.url, json={'metadata': {'session_id': self.id()},
+                'messages': [{'role': 'user', 'content': '把刚才那事办一下'}]}, timeout=3)
+        self.assertIn('没有执行', response.json()['choices'][0]['message']['content'])
+        self.assertEqual(len(Upstream.seen), before)
+
+    def test_background_title_request_cannot_execute_quoted_commands(self):
+        with patch('bridge.kvmem_proxy.route') as route, patch('bridge.kvmem_proxy.classify') as model:
+            response = requests.post(self.url, json={'messages': [
+                {'role': 'system', 'content': 'Generate a title for this conversation'},
+                {'role': 'user', 'content': '喊小z起床'}]}, timeout=3)
+        self.assertEqual(response.status_code, 200)
+        route.assert_not_called()
+        model.assert_not_called()
+
+    def test_contact_selection_and_confirmation_stay_in_the_gateway(self):
+        from types import SimpleNamespace
+
+        rows = [{'name': 'Z', 'uid': 11, 'score': 100}, {'name': 'other', 'uid': 22, 'score': 75}]
+        body = {'stream': False, 'metadata': {'session_id': self.id()}, 'messages': []}
+        before = len(Upstream.seen)
+
+        def ask(text):
+            body['messages'].append({'role': 'user', 'content': text})
+            response = requests.post(self.url, json=body, timeout=3)
+            self.assertEqual(response.status_code, 200, response.text)
+            message = response.json()['choices'][0]['message']
+            body['messages'].append(message)
+            return message['content']
+
+        with patch('bridge.tools.safety.resolve_contact', return_value=(None, '', rows)), \
+             patch('bridge.tools.safety.vault') as vault, patch('bridge.message_service.sender') as sender:
+            vault.return_value.find_by_id.return_value = SimpleNamespace(user_id=11, remark='Z', nickname='Z')
+            self.assertIn('1. Z', ask('ok，你帮忙喊小z起床去'))
+            self.assertIn('准备发给 Z', ask('第一个'))
+            sender.return_value.send_private.assert_not_called()
+            sender.return_value.send_private.return_value = {'retcode': 0}
+            self.assertIn('已发送给 Z', ask('确认'))
+            sender.return_value.send_private.assert_called_once()
+        self.assertEqual(len(Upstream.seen), before)
+
     @classmethod
     def setUpClass(cls):
         cls.up = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
@@ -132,6 +195,28 @@ class GatewayTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.json(), {"error": "busy"})
+
+    def test_visual_request_reaches_upstream_with_real_image_content(self):
+        from test_screen_observer import frame
+        with patch('bridge.kvmem_proxy.route', return_value=None), patch(
+            'bridge.screen_context.fetch_snapshot', return_value={'ok': True, 'frame': frame()}
+        ):
+            response = requests.post(self.url, json={'stream': False,
+                'messages': [{'role': 'user', 'content': '你看看我这个题目是干啥的'}]}, timeout=3)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Upstream.seen[-1]['messages'][-1]['content'][-1]['type'], 'image_url')
+
+    def test_ambiguous_screen_request_classifies_once_then_attaches(self):
+        from test_screen_observer import frame
+        with patch('bridge.kvmem_proxy.classify', return_value=('observe_screen', {})) as classify, patch(
+            'bridge.screen_context.fetch_snapshot', return_value={'ok': True, 'frame': frame()}
+        ) as capture:
+            response = requests.post(self.url, headers={'X-Session-ID': 'screen-intent-fixture'},
+                json={'stream': False, 'messages': [{'role': 'user', 'content': '这个怎么弄'}]}, timeout=3)
+        self.assertEqual(response.status_code, 200)
+        classify.assert_called_once()
+        capture.assert_called_once()
+        self.assertEqual(Upstream.seen[-1]['messages'][-1]['content'][-1]['type'], 'image_url')
 
 
 if __name__ == "__main__":

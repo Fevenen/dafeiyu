@@ -9,7 +9,7 @@ import json
 import os
 import time
 
-from . import safety, settings
+from . import safety, settings, store
 from .context import session_id, request_id
 from .v0_load import reminders
 
@@ -87,12 +87,16 @@ def send_qq_message(to: str, text: str) -> str:
         return error
 
     if candidates and not contact:
+        # Selecting a recipient is a separate step from confirming a send.
+        store.cancel()
+        store.set_dialogue({"kind": "contact_choice", "text": text, "candidates": candidates[:5]})
         names = "、".join(
-            "%s（%d 分）" % (c["name"], c["score"]) for c in candidates[:5]
+            "%d. %s" % (i, c["name"]) for i, c in enumerate(candidates[:5], 1)
         )
         return "「%s」匹配到多个人：%s。要发给哪一个？" % (to, names)
 
     # 唯一确定 → 挂起，等确认（不直接发）
+    store.clear_dialogue()
     old = safety.get_pending()
     same = (
         old
@@ -125,6 +129,29 @@ def cancel_send() -> str:
     from .message_service import cancel
 
     return cancel()
+
+
+def select_recipient(selection: str) -> str:
+    import re
+
+    choice = store.get_dialogue()
+    if choice.get("kind") != "contact_choice":
+        return "没有待选择的联系人，请重新说要发给谁和内容。"
+    rows = choice["candidates"]
+    value = selection.strip().strip("。！!，, ")
+    match = re.fullmatch(r"第?([1-5一二三四五])(?:个|位)?", value)
+    index = (int(match[1]) if match and match[1].isdigit() else "一二三四五".find(match[1]) + 1) if match else 0
+    matches = [row for row in rows if value.casefold() == row["name"].casefold()]
+    selected = rows[index - 1] if 0 < index <= len(rows) else (matches[0] if len(matches) == 1 else None)
+    if selected is None:
+        return "请回复候选序号或完整名字；选择联系人还不会发送消息。"
+    contact = safety.vault().find_by_id(int(selected["uid"]))
+    if contact is None:
+        return "联系人缓存已变化，请重新说要发给谁。"
+    name = contact.remark or contact.nickname
+    safety.set_pending(contact.user_id, name, choice["text"])
+    store.clear_dialogue()
+    return "准备发给 %s（%s）：%s\n确认发送吗？回复「确认」就发，回复「算了」就取消。" % (name, contact.user_id, choice["text"])
 
 
 # ---------------- 提醒 ----------------
@@ -201,5 +228,6 @@ for _n in (
     "confirm_send",
     "cancel_send",
     "recent_actions",
+    "select_recipient",
 ):
     globals()[_n] = _logged(_n)(globals()[_n])

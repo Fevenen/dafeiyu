@@ -22,7 +22,7 @@ def inspect(network=False):
         "session_directory_exists": settings.SESSIONS_DIR.is_dir(),
         "dependencies": {
             m: importlib.util.find_spec(m) is not None
-            for m in ("requests", "pypinyin", "rapidfuzz", "mcp")
+            for m in ("requests", "pypinyin", "rapidfuzz", "mcp", "zstandard")
         },
         "bundled_helpers": (settings.BRIDGE_ROOT / "_v0/sender.py").exists(),
     }

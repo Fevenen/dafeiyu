@@ -9,11 +9,13 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from zstandard import ZstdError
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bridge import settings
 from bridge.net import urlopen
+from bridge.dsh_history import HistoryReader
 
 
 def load_json(path, default):
@@ -93,6 +95,7 @@ def main():
         help="read and print only; no speech, actions or cursor writes",
     )
     parser.add_argument("--sessions")
+    parser.add_argument("--history", help="DSH full session journal directory")
     parser.add_argument("--api")
     parser.add_argument(
         "--once", action="store_true", help="process one snapshot (diagnostics)"
@@ -109,45 +112,53 @@ def main():
         return
     state_path = settings.DATA_DIR / "state/dsh_watch.json"
     state = load_json(state_path, {})
-    active = None
-    seen_response = ""
-    changed = time.monotonic()
+    history = HistoryReader(args.history)
     while True:
         if args.session:
             name = args.session
-            if not name.startswith("session-"):
-                name = "session-" + name
             if not name.endswith(".json"):
                 name += ".json"
+            if not (sessions / name).is_file() and not name.startswith("session-"):
+                name = "session-" + name
             path = sessions / name
         else:
             path = latest(args.dir, sessions)
         if path is None:
             time.sleep(0.3)
             continue
-        _, _, turns = session_turns(path)
+        try:
+            turns = history.turns(path)
+        except (OSError, ValueError, ZstdError) as exc:
+            print("Full DSH journal not ready:", type(exc).__name__, flush=True)
+            turns = []
         if not turns:
+            if args.once:
+                print("No full DSH journal available; outline previews are not spoken.", flush=True)
+                return
             time.sleep(0.3)
             continue
         turn = turns[-1]
+        if not turn.get("complete"):
+            if args.once:
+                return
+            time.sleep(0.3)
+            continue
         key = str(path) + ":" + str(turn.get("turn", len(turns)))
         response = (turn.get("response") or "").strip()
-        if key != active:
-            active = key
-            seen_response = response
-            changed = time.monotonic()
-        if response != seen_response:
-            seen_response = response
-            changed = time.monotonic()
+        if key in state and not state.get("_full_journal_v4"):
+            # Do not replay an old long answer when replacing the preview reader.
+            state[key] = response
+            state["_full_journal_v4"] = True
+            if not args.dry:
+                save(state_path, state)
+        state["_full_journal_v4"] = True
         cursor = state.get(key, "")
         # Edits are treated as a new revision with distinct chunk IDs.
         if not response.startswith(cursor):
             cursor = ""
         tail = response[len(cursor) :]
-        end = max([tail.rfind(c) for c in "。！？!?；;\n"] + [-1])
-        if time.monotonic() - changed >= 1.2:
-            end = len(tail) - 1
-        chunk = tail[: end + 1]
+        # A completed journal turn is definitive, including its unpunctuated tail.
+        chunk = tail
         if chunk:
             pieces = split_sentences(clean(chunk))
             success = True

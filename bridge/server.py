@@ -115,9 +115,10 @@ def list_capabilities() -> str:
 )
 def route_command(text: str, request_id: str = "") -> str:
     from bridge.router import route
+    from bridge.intent import classify
 
     with scope(session_id(), request_id or None, text):
-        result = route(text)
+        result = route(text, classifier=classify, allow_screen=False)
     return (
         result
         if result is not None

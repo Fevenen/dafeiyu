@@ -1,0 +1,11 @@
+{
+  "display_name": "大肥鱼 · 酒馆陪玩与接管",
+  "loading_order": 60,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Dafeiyu contributors",
+  "version": "0.1.0",
+  "minimum_client_version": "1.19.0"
+}

@@ -25,16 +25,27 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
 
     router = APIRouter()
     ws_handler = WebSocketHandler(default_context_cache)
+    from bridge.game_routes import build_router as game_router
+    from bridge.game_context import enabled as game_enabled
+    router.include_router(game_router(ws_handler))
 
     @router.get("/api/health")
     async def api_health():
-        return {"ok": True, "bridge_version": "0.2.1", "speech_queue": True,
+        return {"ok": True, "bridge_version": "0.2.1", "speech_queue": True, "sillytavern_game": game_enabled(),
                 "clients": len(ws_handler.client_connections)}
 
     @router.get("/api/speech/status")
     async def api_speech_status(job_id: str):
         from bridge.presentation import status
         return {"ok": True, "jobs": status(ws_handler, job_id)}
+
+    @router.get('/api/vision/status')
+    async def api_vision_status():
+        return ws_handler.screen_observer.status()
+
+    @router.post('/api/vision/snapshot')
+    async def api_vision_snapshot(payload: dict):
+        return await ws_handler.screen_observer.snapshot((payload or {}).get('client_uid'))
 
     @router.post("/api/speech/cancel")
     async def api_speech_cancel():

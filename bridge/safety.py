@@ -97,18 +97,18 @@ def resolve_contact(hint: str):
         c for c in cands if c.score >= 90 and name_match().strict_ok(c.display, hint)
     ]
     if len(strict) == 1:
-        c = _contact_by_display(strict[0].display)
+        c = vault().find_by_id(strict[0].user_id)
         if c:
             return c, "", []
         return None, f"找到「{strict[0].display}」但取不到 QQ 号", []
 
     if len(strict) > 1:
-        return None, "", [{"name": c.display, "score": c.score} for c in strict]
+        return None, "", [{"name": c.display, "score": c.score, "uid": c.user_id} for c in strict]
 
     return (
         None,
         f"「{hint}」匹配不确定（最像的是「{cands[0].display}」，{cands[0].score} 分）",
-        [{"name": c.display, "score": c.score} for c in cands[:5]],
+        [{"name": c.display, "score": c.score, "uid": c.user_id} for c in cands[:5]],
     )
 
 

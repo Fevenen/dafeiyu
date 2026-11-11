@@ -85,19 +85,23 @@ async def process_single_conversation(
         if images:
             logger.info(f"With {len(images)} images")
 
-        # ---- 确认闸门：待发消息的"确认/取消"由代码处理，不进模型 ----
+        # ---- 统一路由：确定性操作先处理，未命中再做语义分类 ----
         forced_reply = None
         try:
             from bridge import gate as _confirm_gate  # 桌宠项目根目录在 sys.path 上
 
             from bridge.context import scope
             with scope("desktop:" + client_uid, text=input_text):
-                handled, reply = _confirm_gate.handle(input_text)
+                handled, reply = await asyncio.to_thread(
+                    _confirm_gate.handle, input_text,
+                    recent_messages=list(getattr(context.agent_engine, '_memory', None) or []),
+                )
             if handled and reply:
                 forced_reply = reply
                 logger.info(f"确认闸门处理：{reply}")
         except Exception as e:
-            logger.debug(f"确认闸门跳过：{e}")
+            logger.warning(f"桌宠路由失败：{type(e).__name__}")
+            forced_reply = "这次操作判断暂时失败，没有执行操作，请重试。"
 
         if forced_reply:
             speech_text = forced_reply

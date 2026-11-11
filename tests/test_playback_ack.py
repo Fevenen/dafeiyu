@@ -10,6 +10,65 @@ import unittest
 
 
 class PlaybackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_old_ack_cannot_complete_the_next_turn(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "runtime/open_llm_vtuber/conversations/conversation_utils.py"
+        )
+        node = next(
+            n for n in ast.parse(source.read_text(encoding="utf-8")).body
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "finalize_conversation_turn"
+        )
+        waiters = {}
+        notifications = asyncio.Queue()
+
+        async def wait(client, kind, request_id=None, **kwargs):
+            future = asyncio.get_running_loop().create_future()
+            waiters[request_id] = future
+            return await future
+
+        def acknowledge(request_id):
+            future = waiters.get(request_id)
+            if future is not None and not future.done():
+                future.set_result({"type": "frontend-playback-complete", "request_id": request_id})
+
+        async def send(data):
+            message = json.loads(data)
+            if message["type"] == "backend-synth-complete":
+                await notifications.put(message)
+
+        async def noop(*args):
+            pass
+
+        scope = {
+            "asyncio": asyncio, "json": json, "TTSTaskManager": object,
+            "WebSocketSend": object, "Optional": Optional, "BroadcastContext": object,
+            "message_handler": SimpleNamespace(wait_for_response=wait),
+            "send_conversation_end_signal": noop,
+        }
+        exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), "exec"), scope)
+
+        def start():
+            manager = SimpleNamespace(
+                task_list=[asyncio.create_task(asyncio.sleep(0))],
+                _payload_queue=SimpleNamespace(join=noop),
+            )
+            return asyncio.create_task(scope["finalize_conversation_turn"](manager, send, "client"))
+
+        first = start()
+        old_id = (await asyncio.wait_for(notifications.get(), 1))["request_id"]
+        acknowledge(old_id)
+        await asyncio.wait_for(first, 1)
+        second = start()
+        new_id = (await asyncio.wait_for(notifications.get(), 1))["request_id"]
+        self.assertNotEqual(old_id, new_id)
+        acknowledge(old_id)
+        acknowledge(None)
+        await asyncio.sleep(0)
+        self.assertFalse(second.done(), "An old or uncorrelated ack ended the new utterance")
+        acknowledge(new_id)
+        await asyncio.wait_for(second, 1)
+
     async def test_http_command_targets_one_client(self):
         import sys
         from unittest.mock import patch
