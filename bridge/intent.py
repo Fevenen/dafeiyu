@@ -4,7 +4,7 @@ import json
 import time
 from . import settings
 from .net import request as http_request
-from .game_context import active_context
+from .game_context import conversation_context
 
 ARGUMENTS = {
     'send_qq_message': ('to', 'text'),
@@ -73,7 +73,7 @@ def classify(text, capabilities, recent_messages=None, upstream=None):
             if value:
                 history.append(dict(role=row['role'], text=value[-600:]))
     payload = dict(current_message=text, recent_context=history, capabilities=catalogue)
-    game = active_context()
+    game = conversation_context()
     if game:
         payload['current_game'] = game
     schema = dict(

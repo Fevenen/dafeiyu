@@ -54,6 +54,18 @@ async function main() {
     assert.equal(await js('SillyTavern.getContext().chat.length'), initial);
     await js('document.querySelector("#dafeiyu-tavern-panel [data-question]").value="这次怎么选？";document.querySelector("#dafeiyu-tavern-panel [data-ask]").click()');
     await until('document.querySelector("#dafeiyu-tavern-panel [data-comments]").textContent.includes("核对楼上的脚步声")', 'companion question');
+    const commentsBefore = (await (await fetch('http://127.0.0.1:18424/test/status')).json()).counts.comment;
+    await js(`(async()=>{
+        document.querySelector('#dafeiyu-tavern-panel [data-auto]').checked=false;
+        const c=SillyTavern.getContext();
+        c.chat.push({name:'Fixture Innkeeper',is_user:false,is_system:false,mes:'独立同步线索：红钥匙在柜台。',send_date:Date.now(),extra:{}});
+        await c.saveChat();
+        await c.eventSource.emit(c.eventTypes.GENERATION_ENDED);
+    })()`);
+    await until(`fetch('http://127.0.0.1:18424/test/status').then(r=>r.json()).then(s=>s.shared_text.includes('独立同步线索'))`, 'silent mode still synchronizes the latest scene');
+    assert.equal((await (await fetch('http://127.0.0.1:18424/test/status')).json()).counts.comment, commentsBefore);
+    await js(`(async()=>{ const c=SillyTavern.getContext();c.chat.pop();await c.saveChat();await c.eventSource.emit(c.eventTypes.MESSAGE_DELETED);document.querySelector('#dafeiyu-tavern-panel [data-auto]').checked=true; })()`);
+    await wait(350);
     await js('document.querySelector("#dafeiyu-tavern-panel [data-draft]").click()');
     await until('document.querySelector("#dafeiyu-tavern-panel [data-action]").value.includes("二楼的钥匙") && !document.querySelector("#dafeiyu-tavern-panel [data-submit]").disabled', 'draft ready');
     assert.equal(await js('SillyTavern.getContext().chat.length'), initial);

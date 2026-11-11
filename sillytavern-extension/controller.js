@@ -39,8 +39,10 @@ export class TavernController {
         this.mode = off ? 'off' : (this.connected ? 'companion' : 'off');
         this.statusText = off ? '已关闭' : reason; this.emit();
         if (!this.connected) return;
-        const state = await this.control(off ? 'mode' : 'pause', off ? { mode: 'off' } : { clear });
-        if (g === this.generation) this.accept(state);
+        try {
+            const state = await this.control(off ? 'mode' : 'pause', off ? { mode: 'off' } : { clear });
+            if (g === this.generation) this.accept(state);
+        } finally { if (off && g === this.generation) this.connected = false; }
     }
     async invalidate(reason = '剧情已变化，接管已暂停') {
         if (this.mode === 'off') return;
@@ -67,6 +69,18 @@ export class TavernController {
             await this.stop(state.mode === 'off', '连接或接管已到期，请重新开启'); return;
         }
         this.accept(state);
+        if (!this.run && !this.draft && !this.isBusy()) await this.syncIfChanged();
+    }
+    async syncIfChanged() {
+        if (this.mode === 'off') return;
+        const g = this.generation, latest = await this.capture();
+        if (this.current(g) && (!this.snapshot || latest.chat_id !== this.snapshot.chat_id ||
+            latest.signature !== this.snapshot.signature)) await this.sync();
+    }
+    async sceneFinished(autoComment = false) {
+        if (this.mode === 'off' || this.run) return;
+        await this.sync(); // Synchronization never depends on whether the fish speaks.
+        if (autoComment) await this.observe(false);
     }
     async observe(force = false) {
         if (this.mode === 'off') return;

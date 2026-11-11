@@ -1,6 +1,7 @@
 from typing import Union, List, Dict, Any, Optional
 import asyncio
 import json
+from contextlib import ExitStack
 from loguru import logger
 import numpy as np
 
@@ -48,6 +49,8 @@ async def process_single_conversation(
     # Create TTSTaskManager for this conversation
     tts_manager = TTSTaskManager()
     full_response = ""  # Initialize full_response here
+    game_scope = ExitStack()
+    response_ok = False
 
     try:
         # Send initial signals
@@ -58,6 +61,8 @@ async def process_single_conversation(
         input_text = await process_user_input(
             user_input, context.asr_engine, websocket_send
         )
+        from bridge.game_context import game_turn, remember_reply
+        game_scope.enter_context(game_turn('desktop'))
 
         # Create batch input
         batch_input = create_batch_input(
@@ -153,6 +158,7 @@ async def process_single_conversation(
                     )
                     logger.debug(f"Unexpected item content: {output_item}")
 
+            response_ok = True
         except Exception as e:
             logger.exception(
                 f"Error processing agent response stream: {e}"
@@ -185,6 +191,8 @@ async def process_single_conversation(
             )
             logger.info(f"AI response: {full_response}")
 
+        if response_ok:
+            remember_reply(input_text, full_response)
         return full_response  # Return accumulated full_response
 
     except asyncio.CancelledError:
@@ -197,6 +205,7 @@ async def process_single_conversation(
         )
         raise
     finally:
+        game_scope.close()
         cleanup_conversation(tts_manager, session_emoji)
 
 

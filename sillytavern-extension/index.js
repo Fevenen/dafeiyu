@@ -10,7 +10,7 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
       <p class="pet-notice">开启后同步当前聊天正文。陪玩不写入剧情；接管只在指定轮数内行动，随时可点“我来”。</p>
       <label>本机桌宠地址 <input data-base type="url" spellcheck="false"></label>
       <div class="pet-row"><button data-enable>开启陪玩</button><button data-off>关闭</button><button data-stop>我来 · 暂停接管</button></div>
-      <p data-status role="status">已关闭</p><small data-voice-status></small>
+      <p data-status role="status">已关闭</p><small data-sync-status>未开启剧情同步</small><br><small data-voice-status></small>
       <div class="pet-row"><label><input data-auto type="checkbox">自动点评</label><label><input data-voice type="checkbox">桌宠播报</label><button data-observe>点评当前剧情</button></div>
       <div data-comments class="pet-comments" aria-live="polite"></div>
       <label>问大肥鱼 <textarea data-question rows="2" placeholder="比如：你觉得这次该怎么选？"></textarea></label><button data-ask>问她</button>
@@ -18,7 +18,8 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
       <div class="pet-row"><button data-draft>生成行动草稿</button><button data-single>直接代玩一轮</button></div>
       <div class="pet-row"><label>连续轮数 <select data-turns><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label><button data-run>开始有限接管</button></div><small>接管支持单角色聊天，每次最多5轮、5分钟；角色回复完整生成后显示。</small>
       <label>玩家行动草稿 <textarea data-action rows="4" placeholder="草稿在这里，你可以先修改"></textarea></label><button data-submit disabled>提交这份草稿</button>
-      <details><summary>剧情笔记</summary><pre data-memory>暂无笔记</pre><button data-clear>清除当前聊天笔记</button></details>`;
+      <details><summary>近期共享交流</summary><pre data-shared>暂无交流</pre></details>
+      <details><summary>剧情笔记</summary><pre data-memory>暂无笔记</pre><button data-clear>清除当前笔记与共享交流</button></details>`;
     document.body.append(panel);
     const toolbar = document.createElement('div'); toolbar.id = 'dafeiyu-tavern-toolbar';
     toolbar.innerHTML = '<button data-open>🐋 大肥鱼陪玩</button><span data-badge>关闭</span><button data-stop>我来</button>';
@@ -87,6 +88,12 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
         onState: state => {
             el('status').textContent = state.statusText + (state.snapshot?.trimmed ? ' · 使用最近剧情（上下文有上限）' : '');
             toolbar.querySelector('[data-badge]').textContent = state.mode === 'off' ? '关闭' : state.mode === 'takeover' ? `接管 ${state.run?.completed || 0}/${state.run?.total || 1}` : '陪玩';
+            const synced = state.server?.synced_at;
+            el('sync-status').textContent = state.mode === 'off' ? (synced ? '剧情同步已关闭；开麦可回顾近期交流，无法看到新变化' : '未开启剧情同步') :
+                synced ? `酒馆已连接 · 最后同步 ${new Date(synced * 1000).toLocaleTimeString()} · 开麦可接着聊` : '等待剧情同步';
+            const labels = { desktop: '桌宠', dsh: 'DSH', tavern: '酒馆', comment: '点评' };
+            el('shared').textContent = (state.server?.shared_chat || []).map(item =>
+                `${item.user ? `[${labels[item.source] || '陪玩'}] 你：${item.user}\n` : ''}大肥鱼：${item.assistant}`).join('\n\n') || '暂无交流';
             el('submit').disabled = !state.draft || !!state.run?.automatic;
             if (state.draft && draftId !== state.draft.id) { draftId = state.draft.id; el('action').value = state.draft.text; }
             const comments = state.server?.comments || [], latest = comments.at(-1)?.id;
@@ -128,7 +135,8 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
     }
     const observe = () => {
         const last = (getContext().chat || []).filter(row => !row.is_system && row.mes?.trim()).at(-1);
-        if (last && !last.is_user && controller.mode !== 'off' && !controller.run && el('auto').checked) void controller.observe(false).catch(report);
+        if (controller.mode !== 'off' && !controller.run) void controller.sceneFinished(
+            !!last && !last.is_user && el('auto').checked).catch(report);
     };
     on('GENERATION_ENDED', () => { setTimeout(observe, 200); });
     on('GENERATION_STOPPED', () => { if (controller.run) void controller.stop(false, '酒馆生成已停止，接管暂停').catch(report); });
@@ -138,6 +146,7 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
         polling = true; try { await controller.heartbeat(); } catch (error) { report(error); await controller.stop(true).catch(() => {}); } finally { polling = false; }
     }, 2000);
     const dispose = () => {
+        document.removeEventListener('visibilitychange', resume);
         clearInterval(interval); for (const [event, fn] of listeners) source.removeListener(event, fn);
         if (token && !adapters.api) {
             void fetch(endpoint() + 'mode', { method: 'POST', credentials: 'omit', keepalive: true,
@@ -145,6 +154,8 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
         }
         void controller.stop(true).catch(() => {});
     };
+    const resume = () => { if (!document.hidden && controller.mode !== 'off') void controller.heartbeat().catch(report); };
+    document.addEventListener('visibilitychange', resume);
     window.addEventListener('pagehide', dispose, { once: true });
     return { controller, dispose, panel, toolbar };
 }

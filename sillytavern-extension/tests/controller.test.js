@@ -62,6 +62,29 @@ test('preexisting human input prevents even starting takeover', async () => {
     const { f, controller: c } = fixture(); f.setInput('我正在写自己的行动');
     await assert.rejects(c.runTurns(3), /不会覆盖/); assert.equal(f.sent.length, 0); assert.deepEqual(f.calls, []);
 });
+
+test('scene synchronization continues when automatic comments are disabled', async () => {
+    const { f, controller: c } = fixture();
+    await c.enable(); f.calls.length = 0;
+    f.change(); await c.sceneFinished(false);
+    assert.ok(f.calls.includes('context'));
+    assert.ok(!f.calls.includes('comment'));
+    assert.equal(c.snapshot.signature, f.snapshot().signature);
+    assert.equal(f.sent.length, 0);
+});
+
+test('heartbeat catches changed scenes without commentary and off never reads them', async () => {
+    const { f, controller: c } = fixture();
+    await c.enable(); f.calls.length = 0;
+    f.change(); await c.heartbeat();
+    assert.ok(f.calls.includes('context'));
+    assert.ok(!f.calls.includes('comment'));
+    assert.equal(c.snapshot.signature, f.snapshot().signature);
+    await c.stop(true); f.calls.length = 0;
+    await c.heartbeat(); await c.sceneFinished(true); await c.syncIfChanged();
+    assert.deepEqual(f.calls, []);
+    await c.enable(); assert.ok(f.calls.includes('connect'));
+});
 test('pause discards a late draft even if transport ignores abort', async () => {
     const { f, controller: c } = fixture(); f.delay = gate();
     const task = c.runTurns(3).catch(error => error);

@@ -21,7 +21,7 @@ from bridge import store
 from bridge.screen_context import attach_screen, screen_skip_reason
 from bridge.reply_policy import apply_reply_policy
 from bridge.intent import classify as classify_intent
-from bridge.game_context import attach_game
+from bridge.game_context import attach_game, game_turn, remember_reply
 
 UPSTREAM = str(settings.get("kvmem_upstream", "http://127.0.0.1:18200")).rstrip("/")
 PORT = int(settings.get("kvmem_proxy_port", 18080))
@@ -236,7 +236,13 @@ class Handler(BaseHTTPRequestHandler):
         with upstream:
             if not want_stream or upstream.status_code >= 400:
                 try:
-                    return self._send_json(upstream.json(), upstream.status_code)
+                    result = upstream.json()
+                    if upstream.status_code < 400:
+                        choice = (result.get('choices') or [{}])[0]
+                        message = choice.get('message') or {}
+                        if not message.get('tool_calls') and choice.get('finish_reason') not in ('length', 'content_filter'):
+                            remember_reply(last_user_text(messages), message.get('content') or '')
+                    return self._send_json(result, upstream.status_code)
                 except ValueError:
                     return self._send_json({"error": "invalid upstream response"}, 502)
             self.send_response(upstream.status_code)
@@ -248,6 +254,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 # Preserve empty lines: SSE events may contain multiple data lines.
                 first = True
+                parts, event_lines, finished, tool_call = [], [], False, False
                 for line in upstream.iter_lines(chunk_size=1):
                     if first and line.startswith(b"data:"):
                         log(
@@ -257,10 +264,37 @@ class Handler(BaseHTTPRequestHandler):
                         first = False
                     self.wfile.write(line + b"\n")
                     self.wfile.flush()
+                    if line.startswith(b'data:'):
+                        event_lines.append(line[5:].strip())
+                    elif not line and event_lines:
+                        payload = b'\n'.join(event_lines)
+                        event_lines = []
+                        if payload == b'[DONE]':
+                            continue
+                        try:
+                            event = json.loads(payload)
+                            for choice in event.get('choices') or []:
+                                if choice.get('index', 0) != 0:
+                                    continue
+                                delta = choice.get('delta') or {}
+                                content = delta.get('content')
+                                if isinstance(content, str) and sum(map(len, parts)) < 12000:
+                                    parts.append(content)
+                                tool_call = tool_call or bool(delta.get('tool_calls'))
+                                if choice.get('finish_reason'):
+                                    finished = choice['finish_reason'] == 'stop'
+                        except (ValueError, TypeError, AttributeError):
+                            pass
+                if finished and not tool_call:
+                    remember_reply(last_user_text(messages), ''.join(parts))
             except (requests.RequestException, BrokenPipeError, ConnectionResetError):
                 return
 
     def do_POST(self):
+        with game_turn('dsh'):
+            return self._do_POST()
+
+    def _do_POST(self):
         if self.path.rstrip("/") != "/v1/chat/completions":
             return self._send_json({"error": "not found"}, 404)
         try:

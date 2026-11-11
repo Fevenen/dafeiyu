@@ -62,7 +62,9 @@ async def npc(payload: dict):
 
 @app.get('/test/status')
 async def status():
-    return {'ok': True, 'counts': {kind: sum(row['kind'] == kind for row in records) for kind in ('action', 'npc', 'comment', 'question', 'voice')}}
+    shared = service.shared.read() or {}
+    return {'ok': True, 'shared_text': json.dumps(shared.get('context', {}), ensure_ascii=False),
+            'counts': {kind: sum(row['kind'] == kind for row in records) for kind in ('action', 'npc', 'comment', 'question', 'voice')}}
 
 
 @app.post('/test/control')

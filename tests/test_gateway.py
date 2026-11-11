@@ -30,6 +30,18 @@ class Upstream(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.seen.append(body)
+        if body.get('model') == 'game-shared' and body.get('stream'):
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            for event in ({'choices': [{'index': 0, 'delta': {'content': '先问K删哪段记忆。'}, 'finish_reason': None}]},
+                          {'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]}):
+                self.wfile.write(('data: ' + json.dumps(event) + '\n\n').encode())
+                self.wfile.flush()
+            self.wfile.write(b'data: [DONE]\n\n')
+            self.wfile.flush()
+            return
         if body.get("model") == "error":
             data = b'{"error":"busy"}'
             self.send_response(429)
@@ -56,6 +68,39 @@ class Upstream(BaseHTTPRequestHandler):
 
 
 class GatewayTests(unittest.TestCase):
+    def test_game_context_and_replies_cross_real_http_in_both_response_modes(self):
+        from bridge import settings
+        from bridge.game_context import conversation_context
+        from bridge.games.sillytavern import TavernService, digest
+        origin = 'http://127.0.0.1:8000'
+        with tempfile.TemporaryDirectory(prefix='pet-game-http-') as temporary, patch.object(settings, 'DATA_DIR', Path(temporary)):
+            service = TavernService()
+            token = service.connect(origin)['token']
+            service.set_mode(token, origin, 'companion')
+            rows = [{'role': 'assistant', 'name': '主持人', 'text': 'K催你删除记忆来清除追踪。'}]
+            service.sync(token, origin, {'chat_id': 'http-fixture', 'messages': rows,
+                                        'fingerprints': [digest(rows[0])], 'persona': '调查员'})
+            service.shared.remember(conversation_context(), '先别确认。', '本鲸也想先问代价。', 'tavern')
+            for streaming in (False, True):
+                seen = []
+                def route(*args, **kwargs):
+                    seen.append(conversation_context())
+                    return None
+                with patch('bridge.kvmem_proxy.route', side_effect=route):
+                    result = requests.post(self.url, json={'model': 'game-shared', 'stream': streaming,
+                        'metadata': {'session_id': self.id()},
+                        'messages': [{'role': 'user', 'content': '我后面该怎么做？'}]}, timeout=5)
+                self.assertEqual(result.status_code, 200)
+                note = next(row['content'] for row in Upstream.seen[-1]['messages']
+                            if str(row.get('content', '')).startswith('【当前陪玩会话资料】'))
+                self.assertIn('K催你删除记忆', note)
+                self.assertIn('本鲸也想先问代价', note)
+                self.assertIn(seen[0]['revision'], note)
+                shared = conversation_context()['recent_companion_chat']
+                self.assertEqual(shared[-1]['source'], 'dsh')
+                self.assertEqual(shared[-1]['user'], '我后面该怎么做？')
+            self.assertEqual(shared[-1]['assistant'], '先问K删哪段记忆。')
+
     def test_unmatched_chat_classifies_once_then_forwards_without_bridge_tools(self):
         definitions = [{'type': 'function', 'function': {'name': 'send_qq_message'}}]
         with patch('bridge.kvmem_proxy.classify', return_value=('chat', {})) as model:
