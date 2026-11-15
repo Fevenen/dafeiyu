@@ -2,7 +2,7 @@
 
 大肥鱼是一个 Windows 桌宠。你可以在桌宠或 DSH 里聊天，让它朗读回复、设置提醒、在确认后发 QQ 消息，也可以让它看你授权的屏幕，或陪你玩 SillyTavern。
 
-**[下载 v0.3.0](https://github.com/Fevenen/dafeiyu/releases/tag/v0.3.0)** · [首次安装](#安装windows) · [已有环境升级](#升级与限制) · [更新记录](CHANGELOG.md)
+**[下载 v0.3.1](https://github.com/Fevenen/dafeiyu/releases/tag/v0.3.1)** · [首次安装](#安装windows) · [已有环境升级](#升级与限制) · [更新记录](CHANGELOG.md)
 
 下载页提供源码和酒馆扩展。你需要有一个模型服务，语音、Live2D、QQ 和酒馆都可按使用需要配置。单独下载酒馆扩展适合已有大肥鱼后端和 SillyTavern 的用户。
 

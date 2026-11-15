@@ -1,18 +1,19 @@
 """Low-priority, read-only commentary for opted-in screen sharing."""
 
 import asyncio
+import logging
 import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
 import httpx
-from loguru import logger
 
 from . import settings
 from .persona import companion_voice, current_persona
 from .presentation import enqueue
 from .vision import observation_note
 
+logger = logging.getLogger(__name__)
 COMMENT_INTERVAL = 45
 
 
@@ -112,7 +113,7 @@ class ScreenCompanion:
         except asyncio.CancelledError:
             pass
         except Exception as error:
-            logger.warning('Screen commentary unavailable: {}', type(error).__name__)
+            logger.warning('Screen commentary unavailable: %s', type(error).__name__)
         finally:
             if self.jobs.get(uid) is asyncio.current_task():
                 self.jobs.pop(uid)
