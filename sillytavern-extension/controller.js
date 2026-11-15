@@ -18,18 +18,30 @@ export class TavernController {
         try { return await this.api(operation, { epoch: this.epoch, ...data }, aborter.signal); }
         finally { this.requests.delete(aborter); }
     }
+    async ensureConnected() {
+        if (this.connected) return;
+        this.connecting ||= this.control('connect').then(() => { this.connected = true; })
+            .finally(() => { this.connecting = null; });
+        await this.connecting;
+    }
     async enable() {
+        if (this.mode !== 'off') return;
+        const start = this.generation;
         await this.capture(); // A missing chat never enables observation.
+        if (start !== this.generation || this.mode !== 'off') return;
         const g = ++this.generation;
         this.mode = 'companion'; this.statusText = '正在连接'; this.emit();
         try {
-            if (!this.connected) { await this.control('connect'); this.connected = true; }
+            await this.ensureConnected();
             if (!this.current(g)) return;
             const state = await this.control('mode', { mode: 'companion' });
             if (!this.current(g)) return;
             this.accept(state); await this.sync();
             if (this.current(g)) { this.statusText = '陪玩中'; this.emit(); }
-        } catch (error) { if (this.current(g)) { this.mode = 'off'; this.emit(); } throw error; }
+        } catch (error) {
+            if (this.current(g)) await this.stop(true).catch(() => {});
+            throw error;
+        }
     }
     async stop(off = false, reason = '控制权已交还', clear = false) {
         const g = ++this.generation;
@@ -42,7 +54,10 @@ export class TavernController {
         try {
             const state = await this.control(off ? 'mode' : 'pause', off ? { mode: 'off' } : { clear });
             if (g === this.generation) this.accept(state);
-        } finally { if (off && g === this.generation) this.connected = false; }
+        } catch (error) {
+            if (off && g === this.generation) this.connected = false;
+            throw error;
+        }
     }
     async invalidate(reason = '剧情已变化，接管已暂停') {
         if (this.mode === 'off') return;
@@ -69,17 +84,20 @@ export class TavernController {
             await this.stop(state.mode === 'off', '连接或接管已到期，请重新开启'); return;
         }
         this.accept(state);
-        if (!this.run && !this.draft && !this.isBusy()) await this.syncIfChanged();
+        if (!this.run && !this.isBusy()) await this.syncIfChanged();
     }
     async syncIfChanged() {
         if (this.mode === 'off') return;
         const g = this.generation, latest = await this.capture();
         if (this.current(g) && (!this.snapshot || latest.chat_id !== this.snapshot.chat_id ||
-            latest.signature !== this.snapshot.signature)) await this.sync();
+            latest.signature !== this.snapshot.signature)) {
+            if (this.draft || this.draftingSuggestion) await this.stop(false, '剧情已变化，请重新生成草稿');
+            if (this.mode !== 'off') await this.sync();
+        }
     }
     async sceneFinished(autoComment = false) {
         if (this.mode === 'off' || this.run) return;
-        await this.sync(); // Synchronization never depends on whether the fish speaks.
+        await this.syncIfChanged(); // Synchronization never depends on whether the fish speaks.
         if (autoComment) await this.observe(false);
     }
     async observe(force = false) {
@@ -107,55 +125,76 @@ export class TavernController {
         if (!Number.isInteger(turns) || turns < 1 || turns > 5) throw new Error('接管轮数必须在1到5之间');
         this.assertReady();
         if (this.mode === 'off') await this.enable();
-        if (this.run || this.draft) await this.stop();
-        await this.sync();
-        const g = this.generation, state = await this.control('mode', { mode: 'takeover', turns });
-        if (!this.current(g)) throw new Error('接管已取消');
-        this.mode = 'takeover'; this.accept(state);
-        this.run = { total: turns, completed: 0, goal: '', automatic: false };
-        return g;
+        if (this.run || this.draft || this.draftingSuggestion) await this.stop();
+        const g = this.generation;
+        this.granting = true; this.emit();
+        try {
+            await this.sync();
+            if (!this.current(g)) throw new Error('接管已取消');
+            this.assertReady();
+            const state = await this.control('mode', { mode: 'takeover', turns });
+            if (!this.current(g)) throw new Error('接管已取消');
+            this.mode = 'takeover';
+            this.run = { total: turns, completed: 0, goal: '', automatic: true };
+            this.accept(state);
+            return g;
+        } finally { this.granting = false; this.emit(); }
     }
-    async generateDraft(goal, g) {
-        this.assertReady();
+    async generateDraft(goal, g, suggestion = false) {
+        if (!suggestion) this.assertReady();
         await this.sync();
         if (!this.current(g)) throw new Error('接管已暂停');
         const snapshot = this.snapshot;
-        this.statusText = `正在准备第${this.run.completed + 1}/${this.run.total}轮`; this.emit();
+        this.statusText = suggestion ? '正在生成草稿' : `正在准备第${this.run.completed + 1}/${this.run.total}轮`;
+        this.emit();
         const state = await this.rpc('draft', { revision: this.server.revision, goal });
         if (!this.current(g)) throw new Error('旧行动已丢弃');
         const latest = await this.capture();
-        if (!this.current(g) || latest.signature !== snapshot.signature || this.getInput().trim()) {
+        if (!this.current(g) || latest.chat_id !== snapshot.chat_id || latest.signature !== snapshot.signature
+                || (!suggestion && this.getInput().trim())) {
             await this.stop(false, '剧情或输入已变化，旧行动已丢弃'); throw new Error('行动已过时，请重新生成');
         }
         this.draft = { ...state.draft, signature: snapshot.signature, chat_id: snapshot.chat_id };
         this.accept(state); this.statusText = '行动草稿已就绪，可修改后提交'; this.emit();
     }
     async draftOnly(goal = '') {
-        const g = await this.grant(1);
-        this.run.goal = goal;
-        try { await this.generateDraft(goal, g); }
-        catch (error) { if (this.current(g)) await this.stop(false, '生成失败，已交还控制权'); throw error; }
+        if (this.mode === 'off') await this.enable();
+        if (this.mode !== 'companion' || this.run || this.draftingSuggestion) throw new Error('请先结束当前操作。');
+        if (this.draft) await this.stop(false, '正在更新草稿');
+        const g = this.generation;
+        this.draftingSuggestion = true;
+        try { await this.generateDraft(goal, g, true); }
+        catch (error) { if (this.current(g)) await this.stop(false, '草稿生成未完成'); throw error; }
+        finally { this.draftingSuggestion = false; this.emit(); }
     }
     async submitDraft(text = this.draft?.text) {
         if (this.manualSubmitting) return;
-        if (!this.draft || !this.run) throw new Error('没有可提交的草稿');
-        if (this.run.automatic) throw new Error('自动接管进行中，请先点“我来”');
+        if (!this.draft) throw new Error('没有可提交的草稿');
+        if (this.mode !== 'companion' || this.run) throw new Error('自动接管进行中，请先点“我来”');
+        this.assertReady();
         this.manualSubmitting = true;
+        this.emit();
         const g = this.generation;
-        try { await this.commit(text, g); if (this.current(g)) await this.stop(false, '本轮结束，控制权已交还'); }
+        try { await this.commit(text, g, true); if (this.current(g)) await this.stop(false, '本轮结束，控制权已交还'); }
         catch (error) { if (this.current(g)) await this.stop(false, '提交未完成，已暂停；不会自动重发'); throw error; }
-        finally { this.manualSubmitting = false; }
+        finally { this.manualSubmitting = false; this.emit(); }
     }
-    async commit(text, g) {
+    async commit(text, g, manual = false) {
         this.assertReady();
         if (typeof text !== 'string' || !text.trim() || text.length > 2000 || text.trimStart().startsWith('/') || /\{\{|\}\}/.test(text)) {
             throw new Error('行动应为1到2000字的剧情文字，不能是酒馆斜杠命令或宏');
         }
         const draft = this.draft, before = await this.capture();
-        if (!this.current(g) || before.signature !== draft.signature) throw new Error('剧情已变化，不能提交旧行动');
-        await this.rpc('claim', { draft_id: draft.id, revision: draft.revision });
+        if (!this.current(g) || before.chat_id !== draft.chat_id || before.signature !== draft.signature) throw new Error('剧情已变化，不能提交旧行动');
+        this.assertReady();
+        await this.rpc('claim', { draft_id: draft.id, revision: draft.revision, manual });
         const latest = await this.capture();
-        if (!this.current(g) || latest.signature !== draft.signature || this.getInput().trim()) throw new Error('提交前剧情或输入发生变化，未发送行动');
+        if (!this.current(g) || latest.chat_id !== draft.chat_id || latest.signature !== draft.signature) throw new Error('提交前剧情已变化，未发送行动');
+        this.assertReady();
+        if (manual) {
+            this.mode = 'takeover';
+            this.run = { total: 1, completed: 0, automatic: false };
+        }
         this.draft = null; this.statusText = `接管第${this.run.completed + 1}/${this.run.total}轮，等待角色回复`; this.emit();
         this.actionAbort = new AbortController();
         let timer;
@@ -184,7 +223,10 @@ export class TavernController {
                 if (!this.current(g)) return;
                 await this.commit(this.draft.text, g);
             }
-            if (this.current(g)) { await this.stop(false, '授权轮数已完成，控制权已交还'); await this.observe(false); }
+            if (this.current(g)) {
+                await this.stop(false, '授权轮数已完成，控制权已交还');
+                if (this.autoComment?.() ?? true) await this.observe(false);
+            }
         } catch (error) { if (this.current(g)) await this.stop(false, '接管已暂停；不会自动重发'); throw error; }
     }
 }

@@ -1,5 +1,6 @@
 /* eslint-disable no-shadow */
 import { app, ipcMain, globalShortcut, desktopCapturer, screen } from "electron";
+import { request } from 'node:http';
 import { electronApp, optimizer } from "@electron-toolkit/utils";
 import { WindowManager } from "./window-manager";
 import { MenuManager } from "./menu-manager";
@@ -52,10 +53,19 @@ function setupIPC(): void {
 
   ipcMain.on(
     "update-component-hover",
-    (_event, componentId: string, isHovering: boolean) => {
+    (event, componentId: string, isHovering: boolean) => {
+      const window = windowManager.getWindow();
+      if (!window || event.sender !== window.webContents) return;
       windowManager.updateComponentHover(componentId, isHovering);
+      if (componentId === 'live2d-model') window.webContents.send('pet-model-hover', isHovering);
     },
   );
+
+  ipcMain.on('pet-keyboard-focus', (event, focused: boolean) => {
+    if (event.sender === windowManager.getWindow()?.webContents) {
+      windowManager.setPetKeyboardFocus(focused === true);
+    }
+  });
 
   ipcMain.handle("get-config-files", () => {
     const configFiles = JSON.parse(localStorage.getItem("configFiles") || "[]");
@@ -84,6 +94,48 @@ function setupIPC(): void {
       };
     });
   });
+
+  ipcMain.handle('pet-work-areas', (event) => {
+    const window = windowManager.getWindow();
+    if (!window || event.sender !== window.webContents) return [];
+    const bounds = window.getContentBounds();
+    return screen.getAllDisplays().map(({ workArea }) => ({
+      ...workArea, x: workArea.x - bounds.x, y: workArea.y - bounds.y,
+    }));
+  });
+
+  ipcMain.handle('pet-tavern-controls', (event, base: string, action: 'state' | 'command', payload = {}) => {
+    const window = windowManager.getWindow();
+    if (!window || event.sender !== window.webContents || !event.senderFrame?.url.startsWith('file:')) {
+      throw new Error('此操作仅供桌宠客户端使用。');
+    }
+    const url = new URL(base);
+    if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+        || url.username || url.password || (action !== 'state' && action !== 'command')) {
+      throw new Error('请使用本机桌宠地址。');
+    }
+    const data = JSON.stringify(payload);
+    return new Promise((resolve, reject) => {
+      const req = request(new URL('/api/game/sillytavern/desktop-' + action, url), {
+        method: 'POST', headers: { Origin: 'dafeiyu://desktop', 'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data) },
+      }, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (part) => {
+          body += part;
+          if (body.length > 65536) req.destroy(new Error('酒馆状态过长。'));
+        });
+        res.on('error', reject);
+        res.on('end', () => {
+          try { resolve(JSON.parse(body)); } catch (error) { reject(error); }
+        });
+      });
+      req.setTimeout(2000, () => req.destroy(new Error('桌宠服务连接超时。')));
+      req.on('error', reject);
+      req.end(data);
+    });
+  });
 }
 
 app.whenReady().then(() => {
@@ -98,6 +150,15 @@ app.whenReady().then(() => {
       symbolColor: "#FFFFFF",
       height: 30,
     },
+  });
+  const updateWorkAreas = () => { if (!window.isDestroyed()) window.webContents.send('pet-work-areas-changed'); };
+  screen.on('display-metrics-changed', updateWorkAreas);
+  screen.on('display-added', updateWorkAreas);
+  screen.on('display-removed', updateWorkAreas);
+  window.once('closed', () => {
+    screen.removeListener('display-metrics-changed', updateWorkAreas);
+    screen.removeListener('display-added', updateWorkAreas);
+    screen.removeListener('display-removed', updateWorkAreas);
   });
   menuManager.createTray();
 

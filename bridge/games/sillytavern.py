@@ -317,9 +317,9 @@ class TavernService:
 
     async def draft(self, token, origin, revision, goal):
         session = self._get(token, origin)
-        if session['mode'] != 'takeover' or session['remaining'] <= 0:
-            raise GameError(403, '陪玩模式没有接管权限，请先选择接管。')
         stamp = self._snapshot(session)
+        if session['mode'] == 'takeover' and session['remaining'] <= 0:
+            raise GameError(403, '代玩轮数已用完。')
         if revision != stamp[1] or not isinstance(goal, str) or len(goal) > 1000:
             raise GameError(409, '剧情版本已变化，请重新同步。')
         if session['draft']:
@@ -338,14 +338,22 @@ class TavernService:
         session['draft'] = {'id': secrets.token_hex(16), 'revision': revision, 'text': result.strip(), 'claimed': False}
         return self.status(token, origin)
 
-    def claim(self, token, origin, draft_id, revision):
+    def claim(self, token, origin, draft_id, revision, manual=False):
         session = self._get(token, origin)
         draft = session['draft']
-        if (session['mode'] != 'takeover' or not draft or draft['id'] != draft_id or draft['claimed']
-                or revision != session['context']['revision'] or draft['revision'] != revision):
+        mode = 'companion' if manual else 'takeover'
+        if (session['mode'] != mode or not draft or draft['id'] != draft_id or draft['claimed']
+                or revision != (session['context'] or {}).get('revision') or draft['revision'] != revision
+                or (not manual and session['remaining'] <= 0)):
             raise GameError(409, '草稿已失效或已提交，不能重复使用。')
+        if manual:
+            session['mode'] = 'takeover'
+            session['remaining'] = 1
+            session['deadline'] = self.clock() + 300
         draft['claimed'] = True
         session['remaining'] -= 1
+        if manual:
+            self._publish()
         return {'ok': True, 'draft_id': draft_id}
 
     def clear_memory(self, token, origin):

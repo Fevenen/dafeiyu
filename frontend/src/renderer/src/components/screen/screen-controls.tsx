@@ -263,23 +263,28 @@ function ScreenSettings({ onDescribe }: { onDescribe?: () => Promise<void> }) {
 
 export function ScreenControls({
   compact = false,
+  companion = false,
   onDescribe,
 }: {
   compact?: boolean;
+  companion?: boolean;
   onDescribe?: () => Promise<void>;
 }) {
   const capture = useScreenCaptureContext();
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (open) capture.loadSources();
-    (window.api as any)?.updateComponentHover?.("screen-controls", open);
     return () =>
       (window.api as any)?.updateComponentHover?.("screen-controls", false);
   }, [open]);
   const active = capture.isStreaming || capture.isStarting;
   const toggle = () => {
-    if (active) capture.stopCapture();
-    else {
+    if (active) {
+      capture.stopCapture();
+      if (companion) setOpen(false);
+    } else if (companion) {
+      setOpen(true);
+    } else {
       setOpen(true);
       void capture.startCapture();
     }
@@ -290,7 +295,9 @@ export function ScreenControls({
       gap="1"
       onMouseDown={(event) => event.stopPropagation()}
     >
-      <IconButton
+      {companion ? <button type="button" className="pet-pill" role="switch" aria-checked={active}
+        aria-label="屏幕陪玩" title={active ? '正在观察所选画面' : '选择要一起看的屏幕或窗口'}
+        onClick={toggle}><span className="pet-switch" aria-hidden="true" />陪玩</button> : <IconButton
         aria-label={active ? "关闭屏幕视觉" : "开启屏幕视觉"}
         aria-pressed={active}
         title={active ? "屏幕视觉已开启，点击关闭" : "屏幕视觉已关闭，点击开启"}
@@ -303,14 +310,16 @@ export function ScreenControls({
         borderRadius={compact ? "md" : "12px"}
       >
         <FiMonitor size={compact ? 16 : 24} />
-      </IconButton>
+      </IconButton>}
       <PopoverRoot
         open={open}
+        autoFocus={!companion}
         onOpenChange={(details) => setOpen(details.open)}
-        positioning={{ placement: "top-end" }}
+        positioning={{ placement: "top-end", strategy: companion ? 'fixed' : 'absolute' }}
       >
         <PopoverTrigger asChild>
-          <IconButton
+          {companion ? <button type="button" className="pet-pill pet-screen-settings" aria-label="屏幕视觉设置"
+            title="选择屏幕、预览和局部框选"><FiSliders /></button> : <IconButton
             aria-label="屏幕视觉设置"
             title="选择屏幕、预览和局部框选"
             size="xs"
@@ -318,9 +327,12 @@ export function ScreenControls({
             color="gray.300"
           >
             <FiSliders />
-          </IconButton>
+          </IconButton>}
         </PopoverTrigger>
         <PopoverContent
+          data-pet-dock-popover={companion ? '' : undefined}
+          onMouseEnter={() => (window.api as any)?.updateComponentHover?.("screen-controls", true)}
+          onMouseLeave={() => (window.api as any)?.updateComponentHover?.("screen-controls", false)}
           bg="gray.900"
           borderColor="gray.600"
           width="min(420px, calc(100vw - 24px))"
@@ -331,6 +343,8 @@ export function ScreenControls({
             overflowY="auto"
             onMouseDown={(event) => event.stopPropagation()}
           >
+            {companion && !active && <Button size="sm" colorPalette="green" mb="2"
+              onClick={() => { void capture.startCapture(); }}>开启陪玩</Button>}
             <ScreenSettings onDescribe={onDescribe} />
           </PopoverBody>
         </PopoverContent>

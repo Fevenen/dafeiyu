@@ -2,50 +2,68 @@ import { TavernController } from './controller.js';
 import { buildSnapshot, plainText } from './snapshot.js';
 
 export function mount(getContext = () => globalThis.SillyTavern.getContext(), adapters = {}) {
-    if (document.getElementById('dafeiyu-tavern-panel')) return;
+    if (document.getElementById('dafeiyu-tavern-toolbar')) return;
     const context = getContext();
     const preferences = context.extensionSettings.dafeiyu_tavern ||= { base: 'http://127.0.0.1:12393', voice: true, autoComment: true };
-    const panel = document.createElement('section'); panel.id = 'dafeiyu-tavern-panel'; panel.hidden = true;
-    panel.innerHTML = `<header><strong>🐋 大肥鱼酒馆</strong><button data-close aria-label="收起面板">×</button></header>
-      <p class="pet-notice">开启后同步当前聊天正文。陪玩不写入剧情；接管只在指定轮数内行动，随时可点“我来”。</p>
-      <label>本机桌宠地址 <input data-base type="url" spellcheck="false"></label>
-      <div class="pet-row"><button data-enable>开启陪玩</button><button data-off>关闭</button><button data-stop>我来 · 暂停接管</button></div>
-      <p data-status role="status">已关闭</p><small data-sync-status>未开启剧情同步</small><br><small data-voice-status></small>
-      <div class="pet-row"><label><input data-auto type="checkbox">自动点评</label><label><input data-voice type="checkbox">桌宠播报</label><button data-observe>点评当前剧情</button></div>
-      <div data-comments class="pet-comments" aria-live="polite"></div>
-      <label>问大肥鱼 <textarea data-question rows="2" placeholder="比如：你觉得这次该怎么选？"></textarea></label><button data-ask>问她</button>
-      <hr><label>接管目标 <textarea data-goal rows="2" placeholder="比如：试探老板，暂时不要暴露脚印线索"></textarea></label>
-      <div class="pet-row"><button data-draft>生成行动草稿</button><button data-single>直接代玩一轮</button></div>
-      <div class="pet-row"><label>连续轮数 <select data-turns><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label><button data-run>开始有限接管</button></div><small>接管支持单角色聊天，每次最多5轮、5分钟；角色回复完整生成后显示。</small>
-      <label>玩家行动草稿 <textarea data-action rows="4" placeholder="草稿在这里，你可以先修改"></textarea></label><button data-submit disabled>提交这份草稿</button>
-      <details><summary>近期共享交流</summary><pre data-shared>暂无交流</pre></details>
-      <details><summary>剧情笔记</summary><pre data-memory>暂无笔记</pre><button data-clear>清除当前笔记与共享交流</button></details>`;
-    document.body.append(panel);
-    const toolbar = document.createElement('div'); toolbar.id = 'dafeiyu-tavern-toolbar';
-    toolbar.innerHTML = '<button data-open>🐋 大肥鱼陪玩</button><span data-badge>关闭</span><button data-stop>我来</button>';
+    const toolbar = document.createElement('div');
+    toolbar.id = 'dafeiyu-tavern-toolbar';
+    toolbar.innerHTML = `<button type="button" role="switch" aria-checked="false" data-companion>
+        <span class="pet-switch" aria-hidden="true"></span>🐋 大肥鱼陪玩</button>
+        <span data-status role="status">已关闭</span><button type="button" data-stop hidden>我来</button>
+        <label data-voice-setting hidden><input data-voice type="checkbox">桌宠播报</label>`;
     const form = document.getElementById('send_form');
     (form?.parentElement || document.body).insertBefore(toolbar, form || null);
-    const el = name => panel.querySelector(`[data-${name}]`);
-    el('base').value = preferences.base; el('voice').checked = preferences.voice; el('auto').checked = preferences.autoComment;
-    let token = '', draftId = '', lastComment = '', adapterBusy = false;
+    const el = name => toolbar.querySelector(`[data-${name}]`);
+    el('voice').checked = preferences.voice !== false;
+    let token = '', adapterBusy = false, toggling = false, desktopAction = null;
     const input = () => document.getElementById('send_textarea')?.value || '';
     const isBusy = () => {
         const stop = document.getElementById('mes_stop');
         return adapterBusy || !!(stop && getComputedStyle(stop).display !== 'none');
     };
     function endpoint() {
-        const value = new URL(el('base').value);
+        const value = new URL(preferences.base || 'http://127.0.0.1:12393');
         if (value.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(value.hostname) || value.username || value.password) throw new Error('请填写本机HTTP桌宠地址');
         return value.origin + '/api/game/sillytavern/';
     }
     async function api(operation, data = {}, signal) {
-        if (adapters.api) return adapters.api(operation, data, signal);
+        if (adapters.api) {
+            const result = await adapters.api(operation, data, signal);
+            if (operation === 'connect') token = result.token || 'fixture';
+            return result;
+        }
         const response = await fetch(endpoint() + operation, { method: 'POST', credentials: 'omit', signal,
             headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Pet-Game-Token': token } : {}) }, body: JSON.stringify(data) });
         const result = await response.json();
-        if (!response.ok || !result.ok) throw new Error(result.error || '桌宠连接失败');
+        if (!response.ok || !result.ok) throw Object.assign(new Error(result.error || '桌宠连接失败'), { status: response.status });
         if (operation === 'connect') token = result.token;
         return result;
+    }
+    async function appendPetMessage(append, beforeEvent, renderedEvent, isCurrentChat) {
+        const chat = document.getElementById('chat');
+        if (!chat || !events?.[beforeEvent] || !events?.[renderedEvent]) return append();
+        let reading;
+        const before = () => {
+            const top = chat.scrollTop;
+            reading = { top, followsLatest: chat.scrollHeight - chat.clientHeight - top < 24 };
+        };
+        const rendered = () => {
+            if (!reading || !isCurrentChat(getContext())) return;
+            const { top, followsLatest } = reading;
+            if (followsLatest) {
+                chat.scrollTop = chat.scrollHeight;
+            } else if (getContext().powerUserSettings?.auto_scroll_chat_to_bottom) {
+                // SillyTavern's message renderer queues its scroll before emitting the rendered event.
+                requestAnimationFrame(() => { if (isCurrentChat(getContext())) chat.scrollTop = top; });
+            }
+        };
+        source.on(events[beforeEvent], before);
+        source.on(events[renderedEvent], rendered);
+        try { return await append(); }
+        finally {
+            source.removeListener(events[beforeEvent], before);
+            source.removeListener(events[renderedEvent], rendered);
+        }
     }
     async function submit(text, options) {
         if (adapters.submit) return adapters.submit(text, options);
@@ -53,6 +71,8 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
         const [{ sendMessageAsUser }, { hasPendingFileAttachment }] = await Promise.all([import('/script.js'), import('/scripts/chats.js')]);
         const current = getContext();
         const currentChatId = current.getCurrentChatId();
+        const isCurrentChat = live => live.characterId === current.characterId && !live.groupId && live.getCurrentChatId() === currentChatId;
+        const stillInControl = () => options.guard() && !options.signal.aborted && isCurrentChat(getContext());
         if (!options.guard() || options.signal.aborted || input().trim()) throw new Error('控制权或输入已变化，未提交');
         if (current.groupId) throw new Error('群聊目前支持陪玩；接管请使用单角色聊天');
         if (current.onlineStatus === 'no_connection') throw new Error('酒馆主API尚未连接');
@@ -63,69 +83,62 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
         const abortOwnGeneration = () => {
             const live = getContext(), lastPlayer = (live.chat || []).filter(row => row.is_user).at(-1);
             if (generating && lastPlayer?.extra?.dafeiyu_tavern?.action_id === options.actionId
-                    && live.getCurrentChatId() === currentChatId) live.stopGeneration();
+                    && isCurrentChat(live)) live.stopGeneration();
         };
         options.signal.addEventListener('abort', abortOwnGeneration, { once: true });
         try {
-            const message = await sendMessageAsUser(text);
+            const message = await appendPetMessage(() => sendMessageAsUser(text), 'MESSAGE_SENT', 'USER_MESSAGE_RENDERED', isCurrentChat);
             message.extra ||= {}; message.extra.dafeiyu_tavern = { action_id: options.actionId };
+            if (!isCurrentChat(getContext())) return;
             await current.saveChat();
-            if (!options.guard() || options.signal.aborted || input().trim()) return;
+            if (!stillInControl() || input().trim()) return;
+            if (getContext().chat.at(-1) !== message) throw new Error('剧情已变化，未请求角色回复');
             // Quiet generation never consumes/clears new human input or runs slash commands.
             generating = true;
             const reply = await current.generate('quiet', { automatic_trigger: true, quietToLoud: true, signal: options.signal });
             generating = false;
-            if (!options.guard() || options.signal.aborted) return;
+            if (!stillInControl()) return;
+            if (getContext().chat.at(-1) !== message) throw new Error('剧情已变化，已丢弃旧角色回复');
             if (typeof reply !== 'string' && !(reply instanceof String)) throw new Error('酒馆没有返回角色正文');
             if (!String(reply).trim()) throw new Error('酒馆角色回复为空');
-            await current.saveReply({ type: 'normal', getMessage: String(reply) });
+            await appendPetMessage(() => current.saveReply({ type: 'normal', getMessage: String(reply) }),
+                'MESSAGE_RECEIVED', 'CHARACTER_MESSAGE_RENDERED', isCurrentChat);
+            if (!isCurrentChat(getContext())) return;
             await current.saveChat();
         } finally { generating = false; options.signal.removeEventListener('abort', abortOwnGeneration); adapterBusy = false; }
     }
     const controller = new TavernController({ api, capture: adapters.capture || (() => buildSnapshot(getContext(), location.origin, plainText)),
-        getInput: input, isBusy: adapters.isBusy || isBusy, submit, voice: () => el('voice').checked,
+        getInput: input, isBusy: adapters.isBusy || isBusy, submit, voice: () => preferences.voice !== false,
         canSend: () => getContext().groupId ? '群聊目前支持陪玩；接管请使用单角色聊天' : getContext().onlineStatus === 'no_connection' ? '酒馆主API尚未连接，请先连接' : true,
         onState: state => {
-            el('status').textContent = state.statusText + (state.snapshot?.trimmed ? ' · 使用最近剧情（上下文有上限）' : '');
-            toolbar.querySelector('[data-badge]').textContent = state.mode === 'off' ? '关闭' : state.mode === 'takeover' ? `接管 ${state.run?.completed || 0}/${state.run?.total || 1}` : '陪玩';
-            const synced = state.server?.synced_at;
-            el('sync-status').textContent = state.mode === 'off' ? (synced ? '剧情同步已关闭；开麦可回顾近期交流，无法看到新变化' : '未开启剧情同步') :
-                synced ? `酒馆已连接 · 最后同步 ${new Date(synced * 1000).toLocaleTimeString()} · 开麦可接着聊` : '等待剧情同步';
-            const labels = { desktop: '桌宠', dsh: 'DSH', tavern: '酒馆', comment: '点评' };
-            el('shared').textContent = (state.server?.shared_chat || []).map(item =>
-                `${item.user ? `[${labels[item.source] || '陪玩'}] 你：${item.user}\n` : ''}大肥鱼：${item.assistant}`).join('\n\n') || '暂无交流';
-            el('submit').disabled = !state.draft || !!state.run?.automatic;
-            if (state.draft && draftId !== state.draft.id) { draftId = state.draft.id; el('action').value = state.draft.text; }
-            const comments = state.server?.comments || [], latest = comments.at(-1)?.id;
-            if (latest !== lastComment) { lastComment = latest; el('comments').textContent = comments.map(item => item.text).join('\n\n'); }
-            el('memory').textContent = state.server?.memory_review ? '剧情已修改，旧笔记已清除，等待重新整理。' : JSON.stringify(state.server?.memory || {}, null, 2);
-            for (const name of ['draft', 'single', 'run']) el(name).disabled = !!state.run;
-            el('base').disabled = state.mode !== 'off';
-            el('voice-status').textContent = ({ queued: '点评已加入桌宠语音队列', busy: '桌宠正在处理你的对话，本次先显示文字',
-                no_client: '桌宠未连接，当前只显示文字', multiple_clients: '连接了多个桌宠，暂不自动选择播报对象' })[state.server?.voice_status] || '';
+            el('companion').setAttribute('aria-checked', String(state.mode !== 'off'));
+            el('status').textContent = state.statusText;
+            el('stop').hidden = !state.run && !state.manualSubmitting && !state.granting;
+            el('voice-setting').hidden = state.mode === 'off';
         } });
-    const report = error => { if (error?.name !== 'AbortError') { el('status').textContent = error.message || String(error); } };
-    const act = fn => () => { Promise.resolve().then(fn).catch(report); };
-    const stop = act(() => controller.stop(false));
-    toolbar.querySelector('[data-open]').onclick = () => { panel.hidden = !panel.hidden; };
-    toolbar.querySelector('[data-stop]').onclick = stop; el('stop').onclick = stop;
-    el('close').onclick = () => { panel.hidden = true; };
-    el('enable').onclick = act(() => controller.enable()); el('off').onclick = act(() => controller.stop(true));
-    el('observe').onclick = act(async () => { if (controller.mode === 'off') await controller.enable(); await controller.observe(true); });
-    el('ask').onclick = act(() => controller.ask(el('question').value));
-    el('draft').onclick = act(() => controller.draftOnly(el('goal').value));
-    el('submit').onclick = act(() => controller.submitDraft(el('action').value));
-    el('single').onclick = act(() => controller.runTurns(1, el('goal').value));
-    el('run').onclick = act(() => controller.runTurns(Number(el('turns').value), el('goal').value));
-    el('clear').onclick = act(async () => {
-        await controller.stop(false); const state = await controller.rpc('clear-memory'); controller.accept(state);
-    });
-    for (const name of ['voice', 'auto', 'base']) el(name).onchange = () => {
-        preferences.base = el('base').value; preferences.voice = el('voice').checked; preferences.autoComment = el('auto').checked;
-        getContext().saveSettingsDebounced();
-        if (name === 'base') { controller.connected = false; token = ''; }
+    controller.autoComment = () => preferences.autoComment !== false;
+    const report = error => {
+        if (error?.name !== 'AbortError') el('status').textContent = error.message || String(error);
     };
-    const humanInput = () => { if (controller.run || controller.draft) void controller.stop(false, '你开始输入，控制权已交还').catch(report); };
+    async function setCompanion(enabled) {
+        if (toggling && enabled) return;
+        toggling = true;
+        try {
+            if (enabled) await controller.enable();
+            else await controller.stop(true);
+        } finally { toggling = false; }
+    }
+    el('companion').onclick = () => { void setCompanion(controller.mode === 'off').catch(report); };
+    el('stop').onclick = () => { void controller.stop(false).catch(report); };
+    el('voice').onchange = () => {
+        preferences.voice = el('voice').checked;
+        getContext().saveSettingsDebounced();
+    };
+    const humanInput = () => {
+        if (controller.run || controller.manualSubmitting || controller.granting || ['run', 'submit'].includes(desktopAction?.action)) {
+            void controller.stop(false, '你开始输入，控制权已交还').catch(report);
+        }
+    };
     document.getElementById('send_textarea')?.addEventListener('input', humanInput);
     const source = context.eventSource, events = context.eventTypes || context.event_types;
     const listeners = [];
@@ -136,18 +149,79 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
     const observe = () => {
         const last = (getContext().chat || []).filter(row => !row.is_system && row.mes?.trim()).at(-1);
         if (controller.mode !== 'off' && !controller.run) void controller.sceneFinished(
-            !!last && !last.is_user && el('auto').checked).catch(report);
+            !!last && !last.is_user && controller.autoComment()).catch(report);
     };
     on('GENERATION_ENDED', () => { setTimeout(observe, 200); });
     on('GENERATION_STOPPED', () => { if (controller.run) void controller.stop(false, '酒馆生成已停止，接管暂停').catch(report); });
     let polling = false;
     const interval = setInterval(async () => {
-        if (polling || controller.mode === 'off') return;
+        if (polling || toggling || controller.mode === 'off') return;
         polling = true; try { await controller.heartbeat(); } catch (error) { report(error); await controller.stop(true).catch(() => {}); } finally { polling = false; }
     }, 2000);
+    let desktopPolling = false, desktopReceipts = [], desktopSupported = true, disposed = false;
+    async function performDesktop(command) {
+        const action = command.action;
+        if (action === 'off') return setCompanion(false);
+        if (action === 'pause') return controller.stop(false);
+        const generation = controller.generation, snapshot = controller.snapshot;
+        if (controller.mode === 'off' || command.epoch !== controller.epoch || command.revision !== controller.server?.revision) {
+            throw new Error('剧情或控制权已变化，请重试。');
+        }
+        if (action === 'auto') {
+            preferences.autoComment = command.enabled;
+            getContext().saveSettingsDebounced();
+            return;
+        }
+        const latest = await controller.capture();
+        if (!controller.current(generation) || latest.chat_id !== snapshot?.chat_id || latest.signature !== snapshot.signature) {
+            throw new Error('剧情已变化，旧操作已取消。');
+        }
+        if (action === 'submit') {
+            if (controller.draft?.id !== command.draft_id) throw new Error('草稿已经失效。');
+            await controller.submitDraft(command.text);
+        } else {
+            if (controller.run) throw new Error('请先完成当前操作，或点「我来」。');
+            if (action === 'draft') await controller.draftOnly(command.goal);
+            else await controller.runTurns(command.turns, command.goal);
+        }
+    }
+    async function pollDesktop() {
+        if (disposed || !desktopSupported || desktopPolling || controller.mode === 'off'
+                || !controller.connected || !controller.snapshot) return;
+        desktopPolling = true;
+        const receipts = desktopReceipts.slice();
+        const connectionToken = token;
+        let succeeded = false;
+        try {
+            const { command } = await api('desktop-poll', { receipts, view: {
+                auto: controller.autoComment(), status: controller.statusText, draft: controller.draft?.id,
+                run: controller.run, can_send: controller.canSend() === true && !input().trim() && !isBusy(),
+            } });
+            desktopReceipts.splice(0, receipts.length);
+            succeeded = controller.mode !== 'off' && connectionToken === token;
+            if (!disposed && connectionToken === token && command) {
+                desktopAction = command;
+                void performDesktop(command).then(
+                    () => { desktopReceipts.push({ done: command.id }); },
+                    error => { desktopReceipts.push({ done: command.id, error: error.message }); report(error); },
+                ).finally(() => { if (desktopAction === command) desktopAction = null; });
+            }
+        } catch (error) {
+            if (error.status === 404) desktopSupported = false;
+            if (error.status === 403) {
+                token = ''; controller.connected = false;
+                if (controller.mode !== 'off') await controller.stop(true).catch(() => {});
+            }
+        } finally { desktopPolling = false; }
+        if (succeeded) void pollDesktop();
+    }
+    const desktopInterval = setInterval(pollDesktop, 500);
+    void pollDesktop();
     const dispose = () => {
+        disposed = true;
         document.removeEventListener('visibilitychange', resume);
-        clearInterval(interval); for (const [event, fn] of listeners) source.removeListener(event, fn);
+        clearInterval(interval); clearInterval(desktopInterval);
+        for (const [event, fn] of listeners) source.removeListener(event, fn);
         if (token && !adapters.api) {
             void fetch(endpoint() + 'mode', { method: 'POST', credentials: 'omit', keepalive: true,
                 headers: { 'Content-Type': 'application/json', 'X-Pet-Game-Token': token }, body: JSON.stringify({ mode: 'off' }) }).catch(() => {});
@@ -157,7 +231,7 @@ export function mount(getContext = () => globalThis.SillyTavern.getContext(), ad
     const resume = () => { if (!document.hidden && controller.mode !== 'off') void controller.heartbeat().catch(report); };
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('pagehide', dispose, { once: true });
-    return { controller, dispose, panel, toolbar };
+    return { controller, dispose, toolbar };
 }
 
 if (globalThis.SillyTavern?.getContext) {

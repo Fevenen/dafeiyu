@@ -1,5 +1,5 @@
 import {
-  BrowserWindow, screen, shell, ipcMain,
+  BrowserWindow, screen, shell, ipcMain, powerMonitor,
 } from 'electron';
 import { join } from 'path';
 import { is } from '@electron-toolkit/utils';
@@ -25,15 +25,15 @@ export class WindowManager {
 
   constructor() {
     ipcMain.on('renderer-ready-for-mode-change', (_event, newMode) => {
-      if (newMode === 'pet') {
-        setTimeout(() => {
+      if (newMode !== this.currentMode) return;
+      setTimeout(() => {
+        if (newMode !== this.currentMode) return;
+        if (newMode === 'pet') {
           this.continueSetWindowModePet();
-        }, 500);
-      } else {
-        setTimeout(() => {
+        } else {
           this.continueSetWindowModeWindow();
-        }, 500);
-      }
+        }
+      }, 500);
     });
 
     ipcMain.on('mode-change-rendered', () => {
@@ -86,6 +86,7 @@ export class WindowManager {
 
     this.window.on('leave-full-screen', () => {
       this.window?.webContents.send('window-fullscreen-change', false);
+      this.raisePetWindow();
     });
 
     return this.window;
@@ -93,6 +94,28 @@ export class WindowManager {
 
   private setupWindowEvents(): void {
     if (!this.window) return;
+
+    const raisePetWindow = () => this.raisePetWindow();
+    this.window.on('show', raisePetWindow);
+    this.window.on('restore', raisePetWindow);
+    this.window.on('hide', () => {
+      this.hoveringComponents.clear();
+      this.applyPetMouseState();
+      this.setPetKeyboardFocus(false);
+    });
+    this.window.on('blur', () => this.setPetKeyboardFocus(false));
+    this.window.on('always-on-top-changed', (_event, onTop) => {
+      if (!onTop) setImmediate(() => {
+        const window = this.window;
+        if (window && !window.isDestroyed() && window.isVisible() && !window.isAlwaysOnTop()) {
+          this.raisePetWindow();
+        }
+      });
+    });
+    powerMonitor.on('resume', raisePetWindow);
+    this.window.once('closed', () => {
+      powerMonitor.removeListener('resume', raisePetWindow);
+    });
 
     this.window.on('ready-to-show', () => {
       this.window?.show();
@@ -139,7 +162,12 @@ export class WindowManager {
   setWindowMode(mode: 'window' | 'pet'): void {
     if (!this.window) return;
 
+    if (mode === this.currentMode) {
+      this.raisePetWindow();
+      return;
+    }
     this.currentMode = mode;
+    this.hoveringComponents.clear();
     this.window.setOpacity(0);
 
     if (mode === 'window') {
@@ -149,16 +177,23 @@ export class WindowManager {
     }
   }
 
+  private raisePetWindow(): void {
+    const window = this.window;
+    if (this.currentMode !== 'pet' || !window || window.isDestroyed()) return;
+    window.setAlwaysOnTop(true, 'screen-saver');
+    if (process.platform === 'win32' && window.isVisible() && !window.isMinimized()) {
+      window.moveTop();
+    }
+  }
+
   private setWindowModeWindow(): void {
     if (!this.window) return;
 
     this.window.setAlwaysOnTop(false);
     this.window.setIgnoreMouseEvents(false);
-    this.window.setSkipTaskbar(false);
     this.window.setResizable(true);
     this.window.setFocusable(true);
-    this.window.setAlwaysOnTop(false);
-
+    this.window.setSkipTaskbar(false);
     this.window.setBackgroundColor('#ffffff');
     this.window.webContents.send('pre-mode-changed', 'window');
   }
@@ -195,7 +230,7 @@ export class WindowManager {
 
     this.window.setBackgroundColor('#00000000');
 
-    this.window.setAlwaysOnTop(true, 'screen-saver');
+    this.raisePetWindow();
     this.window.setPosition(0, 0);
 
     this.window.webContents.send('pre-mode-changed', 'pet');
@@ -225,18 +260,17 @@ export class WindowManager {
 
     if (isMac) this.window.setWindowButtonVisibility(false);
     this.window.setResizable(false);
-    this.window.setSkipTaskbar(true);
     this.window.setFocusable(false);
+    this.window.setSkipTaskbar(true);
 
     if (isMac) {
-      this.window.setIgnoreMouseEvents(true);
       this.window.setVisibleOnAllWorkspaces(true, {
         visibleOnFullScreen: true,
       });
-    } else {
-      this.window.setIgnoreMouseEvents(true, { forward: true });
     }
+    this.applyPetMouseState();
 
+    this.raisePetWindow();
     this.window.webContents.send('mode-changed', 'pet');
   }
 
@@ -284,48 +318,41 @@ export class WindowManager {
   updateComponentHover(componentId: string, isHovering: boolean): void {
     if (this.currentMode === 'window') return;
 
-    // If force ignore is enabled, don't change the mouse ignore state
-    if (this.forceIgnoreMouse) return;
-
     if (isHovering) {
       this.hoveringComponents.add(componentId);
     } else {
       this.hoveringComponents.delete(componentId);
     }
 
-    if (this.window) {
-      const shouldIgnore = this.hoveringComponents.size === 0;
-      if (isMac) {
-        this.window.setIgnoreMouseEvents(shouldIgnore);
-      } else {
-        this.window.setIgnoreMouseEvents(shouldIgnore, { forward: true });
-      }
-      if (!shouldIgnore) {
-        this.window.setFocusable(true);
-      }
+    this.applyPetMouseState();
+  }
+
+  private applyPetMouseState(): void {
+    const window = this.window;
+    if (this.currentMode !== 'pet' || !window || window.isDestroyed()) return;
+    const shouldIgnore = this.forceIgnoreMouse || this.hoveringComponents.size === 0;
+    this.setIgnoreMouseEvents(shouldIgnore);
+  }
+
+  setPetKeyboardFocus(focused: boolean): void {
+    const window = this.window;
+    if (this.currentMode !== 'pet' || !window || window.isDestroyed()) return;
+    if (focused && (this.forceIgnoreMouse || !window.isVisible())) return;
+    if (window.isFocusable() !== focused) {
+      window.setFocusable(focused);
+      // On Windows setFocusable also changes taskbar membership.
+      window.setSkipTaskbar(true);
     }
+    if (focused && !window.isFocused()) window.focus();
+    if (!focused && window.isFocused()) window.blur();
   }
 
   // Toggle force ignore mouse events
   toggleForceIgnoreMouse(): void {
     this.forceIgnoreMouse = !this.forceIgnoreMouse;
 
-    // Apply the new setting immediately
-    if (this.forceIgnoreMouse) {
-      if (isMac) {
-        this.window?.setIgnoreMouseEvents(true);
-      } else {
-        this.window?.setIgnoreMouseEvents(true, { forward: true });
-      }
-    } else {
-      // Reapply normal behavior based on hovering components
-      const shouldIgnore = this.hoveringComponents.size === 0;
-      if (isMac) {
-        this.window?.setIgnoreMouseEvents(shouldIgnore);
-      } else {
-        this.window?.setIgnoreMouseEvents(shouldIgnore, { forward: true });
-      }
-    }
+    this.applyPetMouseState();
+    if (this.forceIgnoreMouse) this.setPetKeyboardFocus(false);
 
     // Notify renderer about the change
     this.window?.webContents.send('force-ignore-mouse-changed', this.forceIgnoreMouse);

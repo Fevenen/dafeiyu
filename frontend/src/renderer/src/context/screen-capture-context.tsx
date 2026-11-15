@@ -65,6 +65,7 @@ interface ScreenCaptureContextType {
   updateSettings: (value: Partial<CaptureSettings>) => void;
   setCrop: (value: CropRegion | null) => void;
   captureScreen: () => Promise<ScreenFrame | null>;
+  sampleScreen: () => Promise<Uint8ClampedArray | null>;
 }
 const ScreenCaptureContext = createContext<
   ScreenCaptureContextType | undefined
@@ -145,6 +146,33 @@ export function ScreenCaptureProvider({ children }: { children: ReactNode }) {
     setLastFrame(null);
   };
 
+  const drawRegion = (bitmap: ImageBitmap, canvas: HTMLCanvasElement, size: { width: number; height: number }) => {
+    const region = cropRef.current;
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas unavailable');
+    ctx.drawImage(bitmap, Math.floor((region?.x || 0) * bitmap.width), Math.floor((region?.y || 0) * bitmap.height),
+      Math.max(1, Math.floor((region?.width || 1) * bitmap.width)), Math.max(1, Math.floor((region?.height || 1) * bitmap.height)),
+      0, 0, size.width, size.height);
+    return ctx;
+  };
+
+  const sampleScreen = async () => {
+    const token = session.token;
+    const track = session.stream?.getVideoTracks()[0];
+    if (!track || !session.isCurrent(token)) return null;
+    let bitmap: ImageBitmap | undefined;
+    try {
+      bitmap = await new (window as any).ImageCapture(track).grabFrame();
+      if (!bitmap || !session.isCurrent(token)) return null;
+      const ctx = drawRegion(bitmap, document.createElement('canvas'), { width: 64, height: 36 });
+      return ctx.getImageData(0, 0, 64, 36).data;
+    } catch {
+      return null;
+    } finally { bitmap?.close(); }
+  };
+
   const captureScreen = async (): Promise<ScreenFrame | null> => {
     if (!session.enabled) return null;
     const token = session.token;
@@ -160,8 +188,6 @@ export function ScreenCaptureProvider({ children }: { children: ReactNode }) {
         const capturedAt = new Date().toISOString();
         const region = cropRef.current;
         const { maxEdge, format } = settingsRef.current;
-        const sx = Math.floor((region?.x || 0) * bitmap!.width);
-        const sy = Math.floor((region?.y || 0) * bitmap!.height);
         const sw = Math.max(
           1,
           Math.floor((region?.width || 1) * bitmap!.width),
@@ -172,11 +198,7 @@ export function ScreenCaptureProvider({ children }: { children: ReactNode }) {
         );
         const size = fitImageSize(sw, sh, maxEdge);
         const canvas = document.createElement("canvas");
-        canvas.width = size.width;
-        canvas.height = size.height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("Canvas unavailable");
-        ctx.drawImage(bitmap!, sx, sy, sw, sh, 0, 0, size.width, size.height);
+        const ctx = drawRegion(bitmap!, canvas, size);
         const data = canvas.toDataURL(format, 0.85);
         const thumbnailSize = fitImageSize(bitmap!.width, bitmap!.height, 960);
         canvas.width = thumbnailSize.width;
@@ -344,6 +366,7 @@ export function ScreenCaptureProvider({ children }: { children: ReactNode }) {
         updateSettings,
         setCrop,
         captureScreen,
+        sampleScreen,
       }}
     >
       {children}

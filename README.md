@@ -1,18 +1,22 @@
 # 大肥鱼桌宠 · Dafeiyu
 
-在 DSH 或桌宠窗口里聊天，让桌宠帮你给 QQ 好友发消息、设置提醒，并把回答念出来。
+大肥鱼是一个 Windows 桌宠。你可以在桌宠或 DSH 里聊天，让它朗读回复、设置提醒、在确认后发 QQ 消息，也可以让它看你授权的屏幕，或陪你玩 SillyTavern。
 
-**2026-11-11 源码更新：酒馆陪玩与有限接管、共用桌宠人设、统一意图识别、完整语音播报和屏幕授权。** 本次更新提供源码与安装/构建脚本，不包含新的预编译桌宠安装包；更新记录见 [CHANGELOG](CHANGELOG.md)。
+**[下载 v0.3.0](https://github.com/Fevenen/dafeiyu/releases/tag/v0.3.0)** · [首次安装](#安装windows) · [已有环境升级](#升级与限制) · [更新记录](CHANGELOG.md)
+
+下载页提供源码和酒馆扩展。你需要有一个模型服务，语音、Live2D、QQ 和酒馆都可按使用需要配置。单独下载酒馆扩展适合已有大肥鱼后端和 SillyTavern 的用户。
+
+![桌宠的酒馆操作和点评气泡，使用虚构剧情演示](docs/tavern-desktop-preview.png)
 
 ## 使用示例
 
-通用屏幕视觉源码已加入：默认关闭的屏幕按钮、显示器/窗口选择、局部框选、清晰截图及观察时间。需要重建桌面客户端，见 [视觉使用与构建说明](docs/vision.md)。
+桌宠的「陪玩」可选屏幕或窗口，「自动点评」开启后会根据明显画面变化尝试点评。语音和酒馆点评可以在鱼身侧显示，悬停聊天框可翻历史。见 [视觉使用与构建说明](docs/vision.md)。
 
 酒馆陪玩与接管扩展已加入源码：可见剧情陪聊、独立行动草稿、单轮及最多5轮的有限接管，默认关闭。安装与范围见 [酒馆扩展说明](sillytavern-extension/README.md)，流程见 [设计文档](docs/sillytavern-design.md)。
 
 点评与问答复用当前桌宠角色的核心人设，接管行动使用酒馆玩家Persona；开局配置时自动点评可保持安静，最近三次点评用于减少重复。输入文字或点击“我来”暂停接管，“关闭”停止剧情同步，刷新页面后默认关闭。接管先支持单角色聊天，群聊支持陪聊。
 
-开启陪玩后，酒馆、桌宠开麦/文字和DSH共用当前剧情及近期场外交流，关闭自动点评不影响同步。面板显示最后同步时间与“近期共享交流”。关闭或断线后停止新读取和接管，最近历史仍可在30分钟内回顾，并明确标为非实时；清除笔记同时清除共享交流。
+开启陪玩后，酒馆、桌宠开麦/文字和DSH共用当前剧情及近期场外交流，关闭自动点评不影响同步。关闭或断线后停止新读取和接管，最近历史仍可在30分钟内回顾，并明确标为非实时。
 
 已有SillyTavern 1.19.0和已更新的桌宠后端时，可安装配套扩展：
 
@@ -20,7 +24,7 @@
 powershell -ExecutionPolicy Bypass -File .\scripts\install-tavern.ps1 -PetRoot "D:\我的助手\pet" -TavernRoot "D:\游戏\SillyTavern"
 ```
 
-刷新酒馆，在输入框上方点击“🐋 大肥鱼陪玩”→“开启陪玩”。可选择自动点评、桌宠播报、独立草稿或2至5轮连续接管，每次最多5分钟；模型判断和游戏效果取决于实际模型与剧情。
+刷新酒馆并打开一段剧情，在输入框旁开启「大肥鱼陪玩」。鱼旁随即显示工具条，可以切换自动点评、生成和提交草稿，或选择1至5轮代玩。草稿在提交前保持陪玩状态；代玩每次最多5分钟，期间可翻看旧剧情。
 
 ```text
 你：给小王发消息说明天见
@@ -57,21 +61,21 @@ DSH 完整会话日志 → 只读 watcher → 语音队列 → TTS 预合成 →
 
 ## 安装（Windows）
 
-需要 Git、Python 3.10–3.12、uv，以及你自己的模型服务。安装完整桌宠：
+首次安装需要 Git、Python 3.10–3.12、uv、自备模型服务。使用桌面界面还需要 Node.js 24 和 npm。在 PowerShell 中执行：
 
 ```powershell
 git clone https://github.com/Fevenen/dafeiyu.git
 cd dafeiyu
-powershell -ExecutionPolicy Bypass -File .\deps\bootstrap.ps1 -Root "D:\我的助手"
+powershell -ExecutionPolicy Bypass -File .\deps\bootstrap.ps1 -Root "D:\我的助手" -BuildDesktop
 ```
 
-安装器固定使用 Open-LLM-VTuber v1.2.1，校验提交 `3afa41014b4548a0842e9ee2f576f4b164b48886`，包含前端子模块，并安装本仓库的后端覆盖文件。已有桌宠可直接安装：
+也可以从下载页解压源码 ZIP，在解压目录执行第三行。安装器固定使用 Open-LLM-VTuber v1.2.1；`-BuildDesktop` 会构建带大肥鱼功能的 Electron 客户端。只需要后端时省略此参数。已有桌宠可直接安装：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -PetRoot "D:\我的助手\pet"
 ```
 
-安装前请关闭旧服务。安装器会备份被替换的后端文件，并保留已有配置与人设。其他上游版本会被拒绝覆盖。
+安装前请退出旧桌宠客户端和服务。安装器会备份被替换的后端文件，并保留已有配置与人设。更新桌宠界面还需要运行 `scripts/build-client.ps1 -PetRoot <桌宠目录>`，更新酒馆则运行本页的 `scripts/install-tavern.ps1` 命令。
 
 已有环境升级后，也请更新桥接依赖：`uv pip install --python "D:\我的助手\pet\.venv\Scripts\python.exe" -r .\requirements.txt 'mcp>=1.6,<2'`。完整DSH播报新增依赖 zstandard。
 
@@ -79,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -PetRoot "D:\我的助手
 
 接下来配置：
 
-1. `pet/conf.yaml`：LLM、TTS、Live2D。后端地址建议设为 `127.0.0.1`。
+1. `pet/conf.yaml`：LLM、ASR、TTS、Live2D。后端地址建议设为 `127.0.0.1`。上游默认的 SenseVoice 识别模型首次启动时会尝试下载，也可在这里指向已下载的模型。
 2. `pet/bridge/config.json`：QQ 协议端地址/token、KVMem 上游地址、可选客户端和 SnowLuma 启动位置。
 3. 按 [DSH 接入](docs/dsh.md) 使用安装器生成的 MCP/DSH 配置片段。
 
@@ -93,7 +97,7 @@ cd "D:\我的助手\pet"
 .\.venv\Scripts\python.exe -m bridge.doctor --network
 ```
 
-也可以双击安装到 pet 目录的 `启动桌宠客户端.cmd`。未配置 `desktop_client` 时只启动服务；可以使用上游网页客户端或配置自己的 Electron 客户端。
+也可以双击安装到 pet 目录的 `启动桌宠客户端.cmd`。新配置会指向上面的 Electron 构建产物。如果升级前把 `desktop_client` 留空，补填 `../pet-web/release/1.2.1/win-unpacked/open-llm-vtuber-electron.exe` 才会一起启动客户端。在桌面窗口的模式菜单里选 `Pet Mode` 即可悬浮使用。
 
 只使用 MCP/QQ 工具、不安装桌宠时，可在本仓库创建虚拟环境、`pip install -r requirements.txt`，再运行 `python -m bridge.server`。
 
@@ -117,6 +121,8 @@ cd "D:\我的助手\pet"
 | `snowluma_launcher` | 可选 SnowLuma 启动脚本 |
 
 MCP 宿主要求的绝对路径由安装器生成到 `bridge/data/generated/`，不提交 Git。移动安装目录后重新运行安装器生成片段，并更新宿主配置。源码不依赖作者的盘符、用户名或旧 v0 目录。
+
+如果 KVMem 刚启动时首轮推理容易超时，可以在桌宠目录用其 Python 环境运行 `python -m bridge.doctor --warmup`。它会用一句固定的问候跑一轮真实的意图推理，最多等待 90 秒的模型响应。看到 `model_warmup.ok: true` 后再开始聊天。预热只判断意图，不执行工具或读取个人对话。
 
 ## 会话隔离与重试
 
@@ -160,12 +166,14 @@ node --test frontend/scripts/test-screen-vision.mjs frontend/scripts/test-playba
 
 目录：`bridge/` 核心与适配器；`runtime/` 固定上游版本的后端覆盖文件；`frontend/` 桌宠前端覆盖源码；`sillytavern-extension/` 酒馆扩展；`config/` 公开模板；`tests/` 离线测试；`docs/` 使用和架构说明。
 
+开发改动从本仓库开始，用安装脚本应用到桌宠和酒馆。`sync.ps1` 用于从旧的定制安装迁回源码，日常构建无需执行。
+
 ## 升级与限制
 
 - 从旧版本升级请先关闭旧网关、watcher、调度器和后端，再启动新版本。
 - 旧 `_v0/reminders.json` 会导入 SQLite 并保留原文件，归属 legacy `local` 作用域；到期调度仍会处理，查询时可使用该作用域。旧 pending.json 不迁移，需要重新提出发送请求。
 - watcher 仍依赖 DSH 会话 JSON 格式，不保证逐 token 获得文字；桌宠收到的是分段播报。
-- 屏幕视觉通过客户端开关按次读取；没有后台持续视觉推理。尚未增加多 QQ 账号或群消息。
+- 屏幕视觉默认关闭。打开屏幕陪玩和自动点评后，客户端按间隔检测明显变化；开启酒馆陪玩时，剧情点评使用酒馆提供的正文。尚未增加多 QQ 账号或群消息。
 - BGA接入和通用电脑游戏控制目前仅完成方案调研，尚未提供对应插件或接管实现。
 - 未连接的外部服务不会被离线测试替代验证；完整使用仍需正确配置 QQ、模型、TTS 与角色资源。
 

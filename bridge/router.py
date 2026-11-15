@@ -7,6 +7,7 @@ import re
 from . import safety, store, tools
 from .context import request_id
 from .capabilities import REGISTRY, command_text
+from .intent import IntentTransportError
 from .screen_context import wants_screen
 
 SEND = re.compile(
@@ -18,6 +19,7 @@ REMIND = re.compile(
 VERB = re.compile(
     r"^(?:请)?(?:帮我|替我)?(?:喊|叫|让|通知|告诉|转告)\s*(?:一下|一声|下)?\s*"
 )
+GREETING = re.compile(r"(?:你好|您好|嗨|哈喽|早上好|中午好|下午好|晚上好|hi|hello)[。！!～~]*", re.I)
 
 
 def parse(text):
@@ -143,11 +145,15 @@ def route(text, classifier=None, decision_sink=None, allow_screen=True, recent_m
         if decision_sink is not None:
             decision_sink(True)
         return None
+    if command is None and GREETING.fullmatch(q):
+        return None
     if command is None and classifier is not None:
         # Every unmatched turn reaches semantics, including chat and unfamiliar phrasing.
         catalogue = [cap for cap in REGISTRY if cap.name != 'screen' or allow_screen]
         try:
             proposed = classifier(q, catalogue)
+        except IntentTransportError as exc:
+            return str(exc)
         except Exception:
             proposed = None
         if not proposed:

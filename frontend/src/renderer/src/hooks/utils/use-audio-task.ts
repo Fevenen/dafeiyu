@@ -12,6 +12,8 @@ import { toaster } from '@/components/ui/toaster';
 import { useWebSocket } from '@/context/websocket-context';
 import { DisplayText } from '@/services/websocket-service';
 import { useLive2DExpression } from '@/hooks/canvas/use-live2d-expression';
+import { setSpeechText, showUnvoicedSpeech } from './use-speech-text';
+import { petDisplayText } from '@/utils/pet-display-text';
 import * as LAppDefine from '../../../WebSDK/src/lappdefine';
 
 interface AudioTaskOptions {
@@ -84,7 +86,7 @@ export const useAudioTask = () => {
       appendText(displayText.text);
       appendAI(displayText.text, displayText.name, displayText.avatar);
       if (audioBase64) {
-        updateSubtitle(displayText.text);
+        updateSubtitle(petDisplayText(displayText.text));
       }
       if (!forwarded) {
         sendMessage({
@@ -148,15 +150,24 @@ export const useAudioTask = () => {
 
         // Explicit interruption must also settle this task before the next starts.
         let isFinished = false;
+        let showingSpeech = false;
 
         const cleanup = () => {
-          audioManager.clearCurrentAudio(audio);
           if (!isFinished) {
             isFinished = true;
+            audioManager.clearCurrentAudio(audio);
+            if (showingSpeech) setSpeechText('');
             resolve();
           }
         };
         audioManager.setCurrentAudio(audio, model, cleanup);
+
+        audio.addEventListener('playing', () => {
+          const text = displayText?.text?.trim();
+          if (isFinished || !text) return;
+          showingSpeech = true;
+          setSpeechText(text);
+        }, { once: true });
 
         // Enhance lip sync sensitivity
         const lipSyncScale = 2.0;
@@ -210,6 +221,7 @@ export const useAudioTask = () => {
 
         audio.load();
       } else {
+        if (displayText?.text) showUnvoicedSpeech(displayText.text);
         resolve();
       }
     } catch (error) {

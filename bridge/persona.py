@@ -32,11 +32,13 @@ def default_persona():
     return core_persona(text) or _FALLBACK
 
 
-def current_persona(handler):
+def current_persona(handler, uid=None):
     """Use the single connected desktop's current character, including switches."""
     contexts = getattr(handler, 'client_contexts', {})
     connected = getattr(handler, 'client_connections', {})
-    context = contexts.get(next(iter(connected))) if len(connected) == 1 else None
+    if uid is None and len(connected) == 1:
+        uid = next(iter(connected))
+    context = contexts.get(uid)
     context = context or getattr(handler, 'default_context_cache', None)
     character = getattr(context, 'character_config', None)
     return core_persona(getattr(character, 'persona_prompt', '')) or default_persona()

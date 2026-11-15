@@ -27,7 +27,7 @@ class ScreenIntentTests(unittest.TestCase):
             self.assertTrue(decision)
 
     def test_chat_and_feature_discussion_are_classified_as_chat(self):
-        for text in ('今天好累', '你好', '给我讲个故事', '告诉我一个笑话', '现在屏幕识别的逻辑是什么'):
+        for text in ('今天好累', '你今天过得怎么样', '给我讲个故事', '告诉我一个笑话', '现在屏幕识别的逻辑是什么'):
             model, decision = self.decide(text, ('chat', {}))
             model.assert_called_once()
             self.assertFalse(decision)

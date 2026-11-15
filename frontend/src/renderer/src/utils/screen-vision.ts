@@ -104,6 +104,18 @@ export function fitImageSize(width: number, height: number, maxEdge: number) {
   };
 }
 export const screenCaptureSession = new ScreenCaptureSession();
+
+/** Compare tiny cropped frames locally, ignoring small changes such as a cursor. */
+export function screenChanged(before: Uint8ClampedArray, after: Uint8ClampedArray) {
+  if (!before.length || before.length !== after.length) return false;
+  let changed = 0;
+  for (let i = 0; i < before.length; i += 4) {
+    const distance = Math.abs(before[i] - after[i]) + Math.abs(before[i + 1] - after[i + 1])
+      + Math.abs(before[i + 2] - after[i + 2]);
+    if (distance >= 90) changed += 1;
+  }
+  return changed >= before.length / 4 * 0.08;
+}
 /** Last synchronous gate, including frames captured before a stop/source switch. */
 export function authorizeScreenImages<T extends object>(
   message: T,

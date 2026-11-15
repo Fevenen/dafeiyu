@@ -13,6 +13,7 @@ from bridge import settings
 from bridge.game_context import active_context, attach_game
 from bridge.game_routes import build_router
 from bridge.games.sillytavern import GameError, TavernService, digest, generate
+from bridge.games.desktop_controls import DesktopControls
 from bridge.persona import core_persona, current_persona
 
 ORIGIN = 'http://127.0.0.1:8000'
@@ -87,18 +88,66 @@ class TavernTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(active_context())
             self.assertEqual(build_router(None).routes, [])
 
-    async def test_companion_cannot_draft_and_claim_is_single_use(self):
+    def test_desktop_delivery_is_one_use_and_bound_to_scene(self):
+        self.enable()
+        controls = DesktopControls(self.service)
+        view = {'view': {'can_send': True}}
+        controls.poll(self.token, ORIGIN, view)
+        state = controls.status()
+        queued = controls.enqueue({**state, 'action': 'run', 'turns': 1})
+        first = controls.poll(self.token, ORIGIN, view)['command']
+        self.assertEqual(first['id'], queued['id'])
+        self.assertIsNone(controls.poll(self.token, ORIGIN, view)['command'])
+        controls.poll(self.token, ORIGIN, {**view, 'receipts': [{'done': queued['id']}]})
+        self.assertEqual(controls.status()['result']['id'], queued['id'])
+        controls.enqueue({**controls.status(), 'action': 'draft'})
+        self.service.sync(self.token, ORIGIN, scene('老板改口了。'))
+        self.assertIsNone(controls.poll(self.token, ORIGIN, view)['command'])
+        self.assertIn('剧情', controls.status()['result']['error'])
+        controls.enqueue({**controls.status(), 'action': 'run', 'turns': 2})
+        controls.enqueue({**controls.status(), 'action': 'pause'})
+        self.assertTrue(controls.stopping(self.token))
+        self.assertEqual(controls.poll(self.token, ORIGIN, view)['command']['action'], 'pause')
+        self.service.set_mode(self.token, ORIGIN, 'off')
+        self.assertFalse(controls.status()['connected'])
+
+    async def test_companion_draft_only_grants_one_round_at_manual_claim(self):
         state = self.enable()
-        with self.assertRaises(GameError):
-            await self.service.draft(self.token, ORIGIN, state['revision'], '')
-        state = self.service.set_mode(self.token, ORIGIN, 'takeover', 1)
-        draft = (await self.service.draft(self.token, ORIGIN, state['revision'], '试探老板'))['draft']
+        suggestion = await self.service.draft(self.token, ORIGIN, state['revision'], '试探老板')
+        draft = suggestion['draft']
+        self.assertEqual(suggestion['mode'], 'companion')
+        self.assertEqual(suggestion['remaining'], 0)
         again = (await self.service.draft(self.token, ORIGIN, state['revision'], '试探老板'))['draft']
         self.assertEqual(draft['id'], again['id'])
         self.model.assert_awaited_once()
-        self.assertTrue(self.service.claim(self.token, ORIGIN, draft['id'], draft['revision'])['ok'])
         with self.assertRaises(GameError):
             self.service.claim(self.token, ORIGIN, draft['id'], draft['revision'])
+        self.assertTrue(self.service.claim(self.token, ORIGIN, draft['id'], draft['revision'], manual=True)['ok'])
+        self.assertEqual(self.service.status(self.token, ORIGIN)['mode'], 'takeover')
+        with self.assertRaises(GameError):
+            self.service.claim(self.token, ORIGIN, draft['id'], draft['revision'], manual=True)
+
+    def test_off_page_cannot_expose_desktop_controls_or_enable_companion(self):
+        controls = DesktopControls(self.service)
+        view = {'view': {'has_chat': True, 'can_send': True}}
+        controls.poll(self.token, ORIGIN, view)
+        state = controls.status()
+        self.assertFalse(state['connected'])
+        self.assertFalse(state['available'])
+        self.assertIsNone(self.service.sessions[self.token]['context'])
+        with self.assertRaises(GameError):
+            controls.enqueue({**state, 'action': 'on'})
+        self.assertEqual(self.service.sessions[self.token]['mode'], 'off')
+        self.enable()
+        controls.poll(self.token, ORIGIN, view)
+        self.assertTrue(controls.status()['connected'])
+        controls.enqueue({**controls.status(), 'action': 'off'})
+        self.service.set_mode(self.token, ORIGIN, 'off')
+        controls.disconnect(self.token)
+        self.assertFalse(controls.status()['connected'])
+        self.enable()
+        controls.poll(self.token, ORIGIN, view)
+        self.assertIsNone(controls.status()['command'])
 
     async def test_server_enforces_round_budget_after_context_append(self):
         state = self.enable(2)

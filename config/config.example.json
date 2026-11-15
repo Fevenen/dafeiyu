@@ -11,6 +11,6 @@
   "kvmem_proxy_port": 18080,
   "kvmem_keep_messages": 10,
   "confirm_timeout": 300,
-  "desktop_client": "",
+  "desktop_client": "../pet-web/release/1.2.1/win-unpacked/open-llm-vtuber-electron.exe",
   "snowluma_launcher": ""
 }

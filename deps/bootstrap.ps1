@@ -1,7 +1,9 @@
 ﻿#requires -Version 5.1
 param(
     [string]$Root = (Join-Path $PSScriptRoot '..\..'),
-    [string]$OlvRepo = 'https://github.com/Open-LLM-VTuber/Open-LLM-VTuber.git'
+    [string]$OlvRepo = 'https://github.com/Open-LLM-VTuber/Open-LLM-VTuber.git',
+    [switch]$BuildDesktop,
+    [string]$NodeDir = ''
 )
 $ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath($Root)
@@ -29,5 +31,8 @@ try {
     }
 } finally { Pop-Location }
 & (Join-Path $PSScriptRoot '..\install.ps1') -PetRoot $pet -PythonExe $python
+if ($BuildDesktop) {
+    & (Join-Path $PSScriptRoot '..\scripts\build-client.ps1') -PetRoot $pet -NodeDir $NodeDir
+}
 Write-Host 'Next: configure the LLM/TTS/character in conf.yaml and QQ endpoint in bridge/config.json.'
 Write-Host 'No QQ credentials, voice models or Live2D assets are downloaded by this installer.'

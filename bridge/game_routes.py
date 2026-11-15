@@ -1,10 +1,13 @@
 """Additive game-only routes; existing chat, QQ, reminder and screen routes are unchanged."""
 
+import asyncio
+
 from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse
 
 from . import settings
 from .games.sillytavern import GameError, TavernService
+from .games.desktop_controls import DesktopControls
 from .game_context import enabled
 from .persona import current_persona
 
@@ -29,10 +32,13 @@ def build_router(handler, service=None, origins=None):
         return 'queued'
 
     game = service or TavernService(speak=speak, busy=busy, persona=lambda: current_persona(handler))
+    desktop = DesktopControls(game)
+    handler.tavern_is_active = lambda: desktop.active() is not None
+    local_hosts = ('127.0.0.1', '::1', 'localhost', 'testclient')
 
     def credentials(request):
         origin = request.headers.get('origin', '')
-        if origin not in allowed or request.client.host not in ('127.0.0.1', '::1', 'localhost', 'testclient'):
+        if origin not in allowed or request.client.host not in local_hosts:
             raise GameError(403, '只允许配置的本机酒馆页面连接。')
         token = request.headers.get('x-pet-game-token', '')
         return token, origin
@@ -40,13 +46,29 @@ def build_router(handler, service=None, origins=None):
     @router.post('/{operation}')
     async def dispatch(operation: str, request: Request, payload: dict):
         try:
+            if operation in ('desktop-state', 'desktop-command'):
+                # Electron's main process sets this Origin. A browser page cannot set it.
+                if request.client.host not in local_hosts or request.headers.get('origin') != 'dafeiyu://desktop':
+                    raise GameError(403, '此操作仅供本机桌宠使用。')
+                result = desktop.status() if operation == 'desktop-state' else desktop.enqueue(payload)
+                return {'ok': True, **result}
             token, origin = credentials(request)
+            if desktop.stopping(token) and (operation in ('draft', 'claim')
+                    or operation == 'mode' and payload.get('mode') == 'takeover'):
+                raise GameError(409, '已请求交还控制权，旧操作已取消。')
             if operation in ('context', 'comment', 'question', 'draft', 'claim', 'clear-memory'):
                 game.check_epoch(token, origin, payload.get('epoch'))
-            if operation == 'connect':
+            if operation == 'desktop-poll':
+                result = desktop.poll(token, origin, payload)
+                if not result['command']:
+                    # Keep the control channel responsive even when the Tavern tab's timers are throttled.
+                    await asyncio.sleep(0.5)
+            elif operation == 'connect':
                 result = game.connect(origin)
             elif operation == 'mode':
                 result = game.set_mode(token, origin, payload.get('mode'), payload.get('turns', 1))
+                if result['mode'] == 'off':
+                    desktop.disconnect(token)
             elif operation == 'pause':
                 result = game.pause(token, origin, clear=payload.get('clear') is True)
             elif operation == 'context':
@@ -61,7 +83,8 @@ def build_router(handler, service=None, origins=None):
             elif operation == 'draft':
                 result = await game.draft(token, origin, payload.get('revision'), payload.get('goal', ''))
             elif operation == 'claim':
-                result = game.claim(token, origin, payload.get('draft_id'), payload.get('revision'))
+                result = game.claim(token, origin, payload.get('draft_id'), payload.get('revision'),
+                                    manual=payload.get('manual') is True)
             elif operation == 'clear-memory':
                 result = game.clear_memory(token, origin)
             else:

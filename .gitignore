@@ -27,6 +27,13 @@ data/
 *.egg-info/
 build/
 dist/
+out/
+*.asar
+*.exe
+*.zip
+*.7z
+*.gguf
+*.onnx
 assets/
 .vscode/
 .idea/

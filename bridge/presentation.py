@@ -115,7 +115,7 @@ class CachedEngine:
         pass  # The queue owns the prefetched file.
 
 
-async def enqueue(handler, text, key, valid=None):
+async def enqueue(handler, text, key, valid=None, target_uid=None):
     # run_server.py imports src.open_llm_vtuber; installed packages may omit src.
     # Resolve from the actual handler so there is only one backend module instance.
     package = type(handler).__module__.rsplit(".", 1)[0]
@@ -131,6 +131,8 @@ async def enqueue(handler, text, key, valid=None):
         handler._speech_engine_locks = {}
     accepted = 0
     for uid, ws in list(handler.client_connections.items()):
+        if target_uid is not None and uid != target_uid:
+            continue
         ctx = handler.client_contexts.get(uid)
         if ctx is None:
             continue

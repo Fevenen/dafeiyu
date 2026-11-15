@@ -1,5 +1,7 @@
-"""Build the public source tree from a local customized Open-LLM-VTuber tree.
-Only code and persona templates are copied. Never copies runtime data/config.
+"""Import selected source files from an older customized Open-LLM-VTuber tree.
+
+Ordinary development starts in this repository. Only use this migration tool
+when recovering changes from an older installation; review the diff afterward.
 """
 
 import argparse
@@ -11,6 +13,7 @@ RUNTIME_FILES = (
     "websocket_handler.py",
     "conversations/single_conversation.py",
     "conversations/conversation_utils.py",
+    "utils/sentence_divider.py",
     "tts/sherpa_onnx_tts.py",
     "tts/tts_interface.py",
     "agent/stateless_llm/openai_compatible_llm.py",
@@ -21,16 +24,25 @@ FRONTEND_FILES = (
     'src/main/window-manager.ts',
     'src/renderer/src/components/footer/footer.tsx',
     'src/renderer/src/components/electron/input-subtitle.tsx',
+    'src/renderer/src/components/canvas/live2d.tsx',
+    'src/renderer/src/components/electron/pet-tavern-controls.tsx',
+    'src/renderer/src/components/electron/pet-dock.css',
     'src/renderer/src/components/screen/screen-controls.tsx',
     'src/renderer/src/context/screen-capture-context.tsx',
     'src/renderer/src/hooks/footer/use-footer.ts',
     'src/renderer/src/hooks/footer/use-text-input.tsx',
     'src/renderer/src/hooks/electron/use-input-subtitle.ts',
+    'src/renderer/src/hooks/electron/use-pet-dock.ts',
+    'src/renderer/src/hooks/electron/use-screen-companion.ts',
+    'src/renderer/src/hooks/canvas/use-live2d-model.ts',
+    'src/renderer/src/hooks/canvas/use-live2d-resize.ts',
     'src/renderer/src/hooks/utils/use-media-capture.tsx',
     'src/renderer/src/services/websocket-service.tsx',
     'src/renderer/src/services/websocket-handler.tsx',
     'src/renderer/src/utils/screen-vision.ts',
+    'src/renderer/src/utils/pet-display-text.ts',
     'src/renderer/src/hooks/utils/use-audio-task.ts',
+    'src/renderer/src/hooks/utils/use-speech-text.ts',
     'src/renderer/src/utils/task-queue.ts',
     'src/renderer/src/utils/audio-manager.ts',
     'src/renderer/src/utils/playback-completion.ts',

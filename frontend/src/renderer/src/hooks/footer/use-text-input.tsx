@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useWebSocket } from '@/context/websocket-context';
 import { useAiState } from '@/context/ai-state-context';
 import { useInterrupt } from '@/components/canvas/live2d';
@@ -10,7 +10,7 @@ import { authorizeScreenImages } from '@/utils/screen-vision';
 
 export function useTextInput() {
   const [inputText, setInputText] = useState('');
-  const [isComposing, setIsComposing] = useState(false);
+  const composing = useRef(false);
   const wsContext = useWebSocket();
   const { aiState } = useAiState();
   const { interrupt } = useInterrupt();
@@ -50,7 +50,7 @@ export function useTextInput() {
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (isComposing) return;
+    if (composing.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -58,8 +58,8 @@ export function useTextInput() {
     }
   };
 
-  const handleCompositionStart = () => setIsComposing(true);
-  const handleCompositionEnd = () => setIsComposing(false);
+  const handleCompositionStart = () => { composing.current = true; };
+  const handleCompositionEnd = () => { composing.current = false; };
 
   return {
     inputText,

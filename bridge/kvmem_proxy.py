@@ -117,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(response.json(), response.status_code)
             except (requests.RequestException, ValueError):
                 return self._send_json({"error": "upstream unavailable"}, 502)
-        self._send_json({"ok": True, "service": "pet-gateway", "version": "0.2.1", "screen_context": True, "screen_intent_model": True,
+        self._send_json({"ok": True, "service": "pet-gateway", "version": "0.3.0", "screen_context": True, "screen_intent_model": True,
                          "short_reply_policy": True, "contact_choices": True, "command_prefixes": True,
                          "unmatched_intent": "all", "intent_catalogue": "compact"})
 

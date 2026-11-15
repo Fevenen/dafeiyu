@@ -31,7 +31,7 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
 
     @router.get("/api/health")
     async def api_health():
-        return {"ok": True, "bridge_version": "0.2.1", "speech_queue": True, "sillytavern_game": game_enabled(),
+        return {"ok": True, "bridge_version": "0.3.0", "speech_queue": True, "sillytavern_game": game_enabled(),
                 "clients": len(ws_handler.client_connections)}
 
     @router.get("/api/speech/status")

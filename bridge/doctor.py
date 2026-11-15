@@ -1,9 +1,10 @@
-"""Read-only diagnostics. Does not contact QQ or send messages unless --network checks health."""
+"""Inspect local services and optionally run a synthetic model readiness check."""
 
 import argparse
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -38,9 +39,25 @@ def inspect(network=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--network", action="store_true")
+    parser.add_argument("--warmup", action="store_true", help="run a synthetic KVMem intent check after startup")
     args = parser.parse_args()
     report = inspect(args.network)
+    if args.warmup:
+        from bridge.capabilities import REGISTRY
+        from bridge.intent import IntentTransportError, warmup
+
+        started = time.perf_counter()
+        try:
+            ready = warmup(REGISTRY)
+            report["model_warmup"] = {"ok": ready}
+            if not ready:
+                report["model_warmup"]["error"] = "invalid_intent_result"
+        except IntentTransportError as exc:
+            report["model_warmup"] = {"ok": False, "error": str(exc)}
+        report["model_warmup"]["seconds"] = round(time.perf_counter() - started, 2)
     print(json.dumps(report, ensure_ascii=True, indent=2))
+    if args.warmup and not report["model_warmup"]["ok"]:
+        return 1
     return (
         0 if report["bundled_helpers"] and all(report["dependencies"].values()) else 1
     )

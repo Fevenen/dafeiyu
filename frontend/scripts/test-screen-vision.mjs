@@ -5,6 +5,7 @@ import {
   authorizeScreenImages,
   clampCrop,
   fitImageSize,
+  screenChanged,
 } from "../src/renderer/src/utils/screen-vision.ts";
 
 function fakeStream() {
@@ -26,6 +27,15 @@ const frame = (session) => ({
   source: "screen",
   data: "test pixels",
   metadata: { permission_token: session.token },
+});
+
+test('screen changes need a meaningful area, ignoring a cursor and minor noise', () => {
+  const before = new Uint8ClampedArray(64 * 36 * 4);
+  const after = new Uint8ClampedArray(before.length).fill(10);
+  after.fill(255, 0, 4 * 10);
+  assert.equal(screenChanged(before, after), false);
+  after.fill(255, 0, 4 * 250);
+  assert.equal(screenChanged(before, after), true);
 });
 
 test("default off: unsolicited screenshots are stripped but camera/text remain", () => {

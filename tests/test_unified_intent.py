@@ -4,6 +4,7 @@ import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from requests.exceptions import ConnectionError, ReadTimeout
 
 from bridge import intent
 from bridge.capabilities import REGISTRY, model_tools
@@ -116,6 +117,45 @@ class UnifiedIntentTests(unittest.TestCase):
                          {'action': 'observe_screen', 'args': {'enable': 'true'}}):
             with patch('bridge.intent.http_request', return_value=self.response(decision)):
                 self.assertIsNone(intent.classify('照着办', REGISTRY))
+
+    def test_only_standalone_greetings_bypass_classification(self):
+        model = Mock(return_value=('chat', {}))
+        self.assertIsNone(route('你好！', model))
+        model.assert_not_called()
+        self.assertIsNone(route('你好，拜托捎句话给小z', model))
+        model.assert_called_once()
+
+    def test_classifier_bounds_auxiliary_context_but_keeps_the_current_request(self):
+        text = '把这段内容捎给他' + '本轮内容' * 500
+        history = [{'role': 'user', 'content': '收件人小z。' + '很久之前的话' * 600}] * 6
+        game = {'source': 'sillytavern', 'revision': 3,
+                'messages': [{'role': 'assistant', 'text': '门口遇到守卫。' * 100}] * 12,
+                'memory': {'old': 'PRIVATE_LONG_GAME_NOTES'}}
+        with patch('bridge.intent.conversation_context', return_value=game), \
+             patch('bridge.intent.http_request', return_value=self.response({'action': 'chat', 'args': {}})) as call:
+            intent.classify(text, REGISTRY, history)
+        payload = json.loads(call.call_args.kwargs['json']['messages'][-1]['content'])
+        self.assertEqual(payload['current_message'], text)
+        self.assertLessEqual(sum(len(row['text']) for row in payload['recent_context']), 1100)
+        self.assertIn('收件人小z', payload['recent_context'][-1]['text'])
+        self.assertEqual(len(payload['current_game']['messages']), 2)
+        self.assertNotIn('PRIVATE_LONG_GAME_NOTES', str(payload))
+
+    def test_transport_failures_report_the_cause_without_executing_tools(self):
+        for error, expected in ((ReadTimeout, '超时'), (ConnectionError, '连不上')):
+            with self.subTest(error=error), patch('bridge.intent.http_request', side_effect=error), \
+                 patch('bridge.tools.send_qq_message') as send:
+                result = route('拜托捎句话给小z', intent.classify)
+                self.assertIn(expected, result)
+                self.assertIn('没有执行操作', result)
+                send.assert_not_called()
+
+    def test_warmup_runs_one_intent_request_without_live_conversation_context(self):
+        with patch('bridge.intent.conversation_context', side_effect=AssertionError('Read game context')), \
+             patch('bridge.intent.http_request', return_value=self.response({'action': 'chat', 'args': {}})) as call:
+            self.assertTrue(intent.warmup(REGISTRY))
+        call.assert_called_once()
+        self.assertEqual(call.call_args.kwargs['timeout'], (3, 90))
 
     def test_desktop_entry_supplies_semantics_after_unmatched_rules(self):
         from bridge import gate

@@ -19,12 +19,13 @@ function fixture() {
             if (operation === 'mode') { mode = data.mode; remaining = data.turns || 0; epoch++; draft = null; }
             if (operation === 'pause') { mode = 'companion'; epoch++; draft = null; }
             if (operation === 'draft') {
-                if (remaining <= 0) throw new Error('No budget');
+                if (mode === 'takeover' && remaining <= 0) throw new Error('No budget');
                 if (f.delay) await f.delay.promise;
                 draft = { id: String(++serial), text: '我问钥匙在哪里。', revision: snapshot().signature, claimed: false };
             }
             if (operation === 'claim') {
                 if (!draft || draft.claimed) throw new Error('Already claimed');
+                if (data.manual) { assert.equal(mode, 'companion'); mode = 'takeover'; remaining = 1; }
                 draft.claimed = true; remaining--;
                 if (f.claimDelay) await f.claimDelay.promise;
             }
@@ -46,7 +47,12 @@ function fixture() {
 test('off is passive and generated draft does not submit or overwrite human input', async () => {
     const { f, controller: c } = fixture();
     await c.heartbeat(); await c.observe(); assert.deepEqual(f.calls, []);
+    f.setInput('我正在写');
     await c.draftOnly('试探老板'); assert.equal(f.sent.length, 0); assert.ok(c.draft);
+    assert.equal(c.mode, 'companion'); assert.equal(c.run, null);
+    await assert.rejects(c.submitDraft(), /不会覆盖/);
+    assert.ok(c.draft);
+    f.setInput('');
     await c.submitDraft('我改成问楼上钥匙。'); assert.deepEqual(f.sent, ['我改成问楼上钥匙。']);
     assert.equal(c.mode, 'companion'); assert.equal(c.run, null);
 });
@@ -83,7 +89,7 @@ test('heartbeat catches changed scenes without commentary and off never reads th
     await c.stop(true); f.calls.length = 0;
     await c.heartbeat(); await c.sceneFinished(true); await c.syncIfChanged();
     assert.deepEqual(f.calls, []);
-    await c.enable(); assert.ok(f.calls.includes('connect'));
+    await c.enable(); assert.ok(f.calls.includes('mode'));
 });
 test('pause discards a late draft even if transport ignores abort', async () => {
     const { f, controller: c } = fixture(); f.delay = gate();
